@@ -7,6 +7,7 @@ import LessonPlayer from '../components/course/LessonPlayer';
 import GroupDiscussion from '../components/course/GroupDiscussion';
 import userService from '../services/userService';
 import { enrollmentService } from '../services/enrollmentService';
+import ChatWidget from '../components/common/ChatWidget';
 
 const CourseDetail = () => {
   const { id } = useParams();
@@ -860,8 +861,16 @@ const CourseDetail = () => {
           />
         </div>
       </div>
+      {isAuthenticated && (
+        <ChatWidget 
+          user={user}
+          courseTitle={currentCourse?.title}
+          lessonTitle={selectedLesson?.title}
+        />
+      )}
     </div>
   );
 };
 
 export default CourseDetail;
+// Chat widget is appended after export so we keep existing export default. Below we augment rendering by adding the widget inside the JSX above.

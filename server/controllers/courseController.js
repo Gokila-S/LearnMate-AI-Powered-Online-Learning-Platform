@@ -3,6 +3,8 @@ import Lesson from '../models/Lesson.js';
 import Enrollment from '../models/Enrollment.js';
 import Module from '../models/Module.js';
 import path from 'path';
+import { uploadVideoToDrive } from '../utils/driveUploader.js';
+import { deleteDriveFile } from '../utils/driveUploader.js';
 
 // @desc    Get all courses
 // @route   GET /api/courses
@@ -173,10 +175,23 @@ export const deleteCourse = async (req, res, next) => {
       }
     }
 
+    // Collect lesson Drive fileIds before deletion for cleanup
+    const lessons = await Lesson.find({ course: req.params.id }).select('content.type content.data');
+
     await course.deleteOne();
 
     // Delete associated lessons
     await Lesson.deleteMany({ course: req.params.id });
+    // Best-effort Drive cleanup
+    for (const l of lessons) {
+      try {
+        if (l.content?.type === 'video' && l.content?.data?.storage === 'drive' && l.content?.data?.driveFileId) {
+          await deleteDriveFile(l.content.data.driveFileId);
+        }
+      } catch (e) {
+        console.warn('[CourseDelete] Drive cleanup failed (continuing):', e.message);
+      }
+    }
     
     // Delete enrollments
     await Enrollment.deleteMany({ course: req.params.id });
@@ -207,19 +222,46 @@ export const addLesson = async (req, res, next) => {
       }
     }
 
-  const { title, description, order, isPreview, moduleId } = req.body;
-    if (!title || !description) {
-      return res.status(400).json({ success: false, message: 'Title and description are required' });
+    const { title, description, order, isPreview, moduleId } = req.body;
+    if (!title) {
+      return res.status(400).json({ success: false, message: 'Title is required' });
+    }
+    // Allow auto-fallback for missing description (front-end now sends one, but for resilience)
+    let lessonDescription = description;
+    if (!lessonDescription) {
+      if (req.body.htmlContent && typeof req.body.htmlContent === 'string') {
+        lessonDescription = req.body.htmlContent.replace(/[#>*`\-_|]/g,'').split(/\n/).map(l=>l.trim()).filter(Boolean)[0] || '';
+      } else if (Array.isArray(req.body.questions) && req.body.questions.length > 0) {
+        lessonDescription = req.body.questions[0].question?.slice(0,140) || '';
+      }
+      if (!lessonDescription) lessonDescription = `${title} lesson`;
     }
 
     let contentData = {};
     if (req.file) {
+      // First, create local reference
       contentData = {
         videoUrl: `/uploads/lessons/${path.basename(req.file.path)}`,
         originalName: req.file.originalname,
         size: req.file.size,
-        mimetype: req.file.mimetype
+        mimetype: req.file.mimetype,
+        storage: 'local'
       };
+      // Attempt Drive upload if configured
+      const driveMeta = await uploadVideoToDrive(req.file.path, req.file.originalname);
+      if (driveMeta) {
+        contentData.driveFileId = driveMeta.driveFileId;
+        contentData.webViewLink = driveMeta.webViewLink;
+        contentData.webContentLink = driveMeta.webContentLink;
+        contentData.storage = 'drive';
+        // Add both streamUrl (legacy) and embedLink (preferred) forms
+        contentData.streamUrl = `https://drive.google.com/file/d/${driveMeta.driveFileId}/preview`;
+        contentData.embedLink = `https://drive.google.com/file/d/${driveMeta.driveFileId}/preview`;
+      }
+      else if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID) {
+        // Config appears present but upload failed (already logged by uploader) – surface a concise lesson-level warning
+        console.warn('[LessonAdd] Drive upload not applied; using local file only. Check earlier [DriveUpload] logs for details.');
+      }
     } else if (req.body.videoUrl) {
       // Allow providing a direct video URL without upload
       contentData = {
@@ -266,7 +308,7 @@ export const addLesson = async (req, res, next) => {
       try {
         lesson = await Lesson.create({
           title,
-          description,
+          description: lessonDescription,
           content: {
             type: req.file || req.body.videoUrl ? 'video' : 
                   req.body.youtubeUrl ? 'youtube' : 

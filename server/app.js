@@ -15,6 +15,7 @@ import moduleRoutes from './routes/modules.js';
 import providerRoutes from './routes/providers.js';
 import lessonRoutes from './routes/lessons.js';
 import discussionRoutes from './routes/discussions.js';
+import aiRoutes from './routes/ai.js';
 
 // Load environment variables
 dotenv.config();
@@ -48,6 +49,7 @@ app.use('/api/modules', moduleRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/providers', providerRoutes);
 app.use('/api/lessons', lessonRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

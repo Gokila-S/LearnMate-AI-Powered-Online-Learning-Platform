@@ -1,6 +1,11 @@
 import Lesson from '../models/Lesson.js';
 import Course from '../models/Course.js';
 import Module from '../models/Module.js';
+import { deleteDriveFile, getDriveAuthMode } from '../utils/driveUploader.js';
+import { default as driveUtil } from '../utils/driveUploader.js';
+import path from 'path';
+import fs from 'fs';
+import { uploadVideoToDrive } from '../utils/driveUploader.js';
 
 // Extract YouTube video ID from a variety of URL formats
 const extractYouTubeVideoId = (url) => {
@@ -75,21 +80,70 @@ export const updateLesson = async (req, res, next) => {
       }
     }
 
-    // Apply updates
     const updates = {};
+  let oldDriveFileIdToDelete = null;
+  let oldLocalPathToDelete = null;
+  let uploadedWith = null; // drive auth mode if new upload occurs
+  let oldDriveDeleted = null;
+  let oldLocalDeleted = null;
+
     if (req.body.title !== undefined) updates.title = req.body.title;
     if (req.body.description !== undefined) updates.description = req.body.description;
     if (req.body.duration !== undefined) updates.duration = req.body.duration;
     if (req.body.isPreview !== undefined) updates.isPreview = req.body.isPreview;
 
-    // Content updates (optional)
-    const newContent = buildContentFromPayload(req.body, lesson.content);
-    if (newContent) updates.content = newContent;
+    // Video replacement: if a new file uploaded (req.file) we'll build a fresh video content object
+    if (req.file) {
+      // Record old file references for post-update deletion
+      if (lesson.content?.type === 'video' && lesson.content?.data) {
+        if (lesson.content.data.storage === 'drive' && lesson.content.data.driveFileId) {
+          oldDriveFileIdToDelete = lesson.content.data.driveFileId;
+        } else if (lesson.content.data.storage === 'local' && lesson.content.data.videoUrl) {
+          // local path is served from /uploads/lessons/<filename>
+            const base = path.basename(lesson.content.data.videoUrl);
+            oldLocalPathToDelete = path.join(process.cwd(), 'uploads', 'lessons', base);
+        }
+      }
+      // Build new content data similarly to addLesson logic
+      let contentData = {
+        videoUrl: `/uploads/lessons/${path.basename(req.file.path)}`,
+        originalName: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+        storage: 'local'
+      };
+      const driveMeta = await uploadVideoToDrive(req.file.path, req.file.originalname);
+      if (driveMeta) {
+        contentData.driveFileId = driveMeta.driveFileId;
+        contentData.webViewLink = driveMeta.webViewLink;
+        contentData.webContentLink = driveMeta.webContentLink;
+        contentData.storage = 'drive';
+        contentData.streamUrl = `https://drive.google.com/file/d/${driveMeta.driveFileId}/preview`;
+        contentData.embedLink = `https://drive.google.com/file/d/${driveMeta.driveFileId}/preview`;
+        uploadedWith = getDriveAuthMode() || null;
+      }
+      updates.content = { type: 'video', data: contentData };
+    } else {
+      // Non-file content update path (quiz/text/etc or metadata changes)
+      const newContent = buildContentFromPayload(req.body, lesson.content);
+      if (newContent) updates.content = newContent;
+    }
 
     updates.updatedAt = new Date();
 
     const updated = await Lesson.findByIdAndUpdate(lessonId, updates, { new: true });
-    return res.status(200).json({ success: true, data: updated });
+
+    // Post-update cleanup (best effort) - delete old Drive/local video if replaced
+    if (req.file) {
+      if (oldDriveFileIdToDelete) {
+        try { oldDriveDeleted = await deleteDriveFile(oldDriveFileIdToDelete); } catch(e){ oldDriveDeleted = false; console.warn('[LessonUpdate] Old Drive file delete failed:', e.message); }
+      }
+      if (oldLocalPathToDelete) {
+        try { fs.unlink(oldLocalPathToDelete, ()=>{}); oldLocalDeleted = true; } catch(e){ oldLocalDeleted = false; console.warn('[LessonUpdate] Old local file delete failed:', e.message); }
+      }
+    }
+
+    return res.status(200).json({ success: true, data: updated, replacedVideo: !!req.file, uploadedWith, oldDriveDeleted, oldLocalDeleted });
   } catch (error) {
     next(error);
   }
@@ -128,9 +182,33 @@ export const deleteLesson = async (req, res, next) => {
       { $pull: { lessons: lesson._id }, $inc: { totalLessons: -1 } }
     );
 
+  let driveDeletion = null;
+    try {
+      if (lesson.content?.type === 'video' && lesson.content?.data?.storage === 'drive' && lesson.content?.data?.driveFileId) {
+        console.log('[LessonDelete] Attempting Drive file removal', {
+          driveFileId: lesson.content.data.driveFileId
+        });
+        const targetId = lesson.content.data.driveFileId;
+        driveDeletion = await deleteDriveFile(targetId);
+        console.log('[LessonDelete] Drive deletion result =', driveDeletion);
+        // Optional verification: attempt metadata fetch if reported success to confirm 404
+        if (driveDeletion) {
+          try {
+            const drive = await (await import('googleapis')).google.drive({ version: 'v3', auth: (await (async () => { /* reuse internal client via util */ return (await driveUtil)?.getDriveAuthMode ? undefined : undefined; })()) });
+            // NOTE: Above direct verification is intentionally skipped to avoid re-auth complexity.
+          } catch(verifyErr) {
+            // Silently ignore; verification is optional
+          }
+        }
+      }
+    } catch (cleanupErr) {
+      driveDeletion = false;
+      console.warn('[LessonDelete] Drive cleanup failed (continuing):', cleanupErr.message);
+    }
+
     await lesson.deleteOne();
 
-    return res.status(200).json({ success: true, message: 'Lesson deleted' });
+    return res.status(200).json({ success: true, message: 'Lesson deleted', driveDeletion });
   } catch (error) {
     next(error);
   }

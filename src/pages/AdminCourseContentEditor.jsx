@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { generateQuizQuestions, generateQuizVariant } from '../services/aiService';
 // Rich-text (HTML) -> Markdown conversion on paste
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
@@ -38,6 +39,52 @@ const AdminCourseContentEditor = () => {
     duration: '',
     questions: [] // For quiz and assessment types
   });
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoError, setVideoError] = useState('');
+  const [isDragActive, setIsDragActive] = useState(false);
+  const fileInputRef = useRef(null);
+  // Upload progress state for video lessons
+  const [uploading, setUploading] = useState(false);
+  // Distinguish whether current overlay is for create or update action
+  const [uploadContext, setUploadContext] = useState(null); // 'create' | 'update' | null
+  const [uploadProgress, setUploadProgress] = useState(0); // 0-100
+  const [uploadPhase, setUploadPhase] = useState(''); // 'preparing' | 'uploading' | 'done' | 'error'
+  const uploadProgressUpdatedAtRef = useRef(Date.now());
+  const lessonCountRef = useRef(0);
+
+  // Helper to finalize & hide overlay
+  const finalizeUpload = (success = true) => {
+    setUploadProgress(100);
+    setUploadPhase(success ? 'done' : 'error');
+    // Quick success pulse then disappear
+    setTimeout(() => {
+      setUploading(false);
+      setUploadPhase('');
+      setUploadProgress(0);
+      setUploadContext(null);
+    }, success ? 300 : 1200);
+  };
+  // AI quiz generation state
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState([]); // list of AI question objects
+  const [aiError, setAiError] = useState(null);
+  const [aiSelected, setAiSelected] = useState(new Set());
+  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState('medium');
+
+  // Basic similarity function (Jaccard on lowercased words) for deduplication
+  const questionSimilarity = (a, b) => {
+    if (!a || !b) return 0;
+    const wa = new Set(a.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(Boolean));
+    const wb = new Set(b.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(Boolean));
+    if (wa.size === 0 || wb.size === 0) return 0;
+    let inter = 0;
+    wa.forEach(w => { if (wb.has(w)) inter++; });
+    return inter / Math.max(wa.size, wb.size);
+  };
+  const isDuplicateQuestion = (text, existingList) => {
+    return existingList.some(q => questionSimilarity(q.question, text) >= 0.85);
+  };
 
   // Refs for markdown paste handling
   const articleTextareaRef = useRef(null);
@@ -237,6 +284,18 @@ const AdminCourseContentEditor = () => {
     }
   };
 
+  // Track lesson count changes to auto-dismiss overlay as soon as new lesson appears
+  useEffect(() => {
+    const currentCount = modules.reduce((tot, m) => tot + (m.lessons?.length || 0), 0);
+    if (lessonCountRef.current === 0) {
+      lessonCountRef.current = currentCount; // initialize baseline
+    } else if (uploading && currentCount > lessonCountRef.current) {
+      // A new lesson showed up -> treat as success completion
+      lessonCountRef.current = currentCount;
+      finalizeUpload(true);
+    }
+  }, [modules, uploading]);
+
   const resetForms = () => {
     setModuleForm({ title: '' });
     setLessonForm({ title: '', type: 'video', content: '', duration: '', questions: [] });
@@ -245,6 +304,8 @@ const AdminCourseContentEditor = () => {
     setEditingModule(null);
     setEditingLesson(null);
     setSelectedModuleId(null);
+    setVideoFile(null);
+    setVideoError('');
   };
 
   const handleCreateModule = async (e) => {
@@ -280,51 +341,178 @@ const AdminCourseContentEditor = () => {
   const handleCreateLesson = async (e) => {
     e.preventDefault();
     if (!lessonForm.title || !selectedModuleId) return;
+    if (lessonForm.type === 'video' && videoError) return; // Block submit on validation error
     
     try {
-      // Map to backend contract
-      const body = {
-        title: lessonForm.title,
-        duration: lessonForm.duration || 15,
-        moduleId: selectedModuleId,
-        type: lessonForm.type
-      };
-      if (lessonForm.type === 'video') body.videoUrl = lessonForm.content;
-      else if (lessonForm.type === 'youtube') body.youtubeUrl = lessonForm.content;
-      else if (lessonForm.type === 'quiz' || lessonForm.type === 'assessment') body.questions = lessonForm.questions;
-      else body.htmlContent = lessonForm.content || '';
-
-      const res = await api.post(`/courses/${courseId}/lessons`, body);
+      let res;
+      if (lessonForm.type === 'video') {
+        const fd = new FormData();
+        fd.append('title', lessonForm.title);
+        fd.append('description', (lessonForm.content && typeof lessonForm.content === 'string'
+          ? lessonForm.content.replace(/[#>*`\-_|]/g,'').split(/\n/).map(l=>l.trim()).filter(Boolean)[0] || 'Video lesson'
+          : 'Video lesson').slice(0,180));
+        fd.append('duration', lessonForm.duration || 15);
+        fd.append('moduleId', selectedModuleId);
+        fd.append('type', 'video');
+        if (videoFile) {
+          fd.append('video', videoFile);
+        } else if (lessonForm.content) {
+          // fallback to URL if user still wants to link
+            fd.append('videoUrl', lessonForm.content);
+        }
+        // Track upload progress only when an actual file is being sent
+        if (videoFile) {
+          setUploading(true);
+          setUploadPhase('preparing');
+          setUploadProgress(0);
+        }
+        res = await api.post(`/courses/${courseId}/lessons`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (evt) => {
+            if (!videoFile) return; // only show progress for real file upload
+            if (evt.total) {
+              const pct = Math.round((evt.loaded / evt.total) * 100);
+              // first progress event => switch to uploading phase
+              if (uploadPhase !== 'uploading') setUploadPhase('uploading');
+              setUploadProgress(pct);
+              uploadProgressUpdatedAtRef.current = Date.now();
+            } else {
+              // No total means we can't calculate percent (maybe transfer-encoding: chunked)
+              if (uploadPhase !== 'uploading') setUploadPhase('uploading');
+              uploadProgressUpdatedAtRef.current = Date.now();
+            }
+          }
+        });
+        // Server responded — treat as done (Drive work already completed server-side)
+        if (videoFile) finalizeUpload(true);
+      } else {
+        const body = {
+          title: lessonForm.title,
+          description: (lessonForm.content && typeof lessonForm.content === 'string'
+            ? lessonForm.content.replace(/[#>*`\-_|]/g,'').split(/\n/).map(l=>l.trim()).filter(Boolean)[0] || 'Auto generated description'
+            : 'Auto generated description').slice(0, 180),
+          duration: lessonForm.duration || 15,
+          moduleId: selectedModuleId,
+          type: lessonForm.type
+        };
+        if (lessonForm.type === 'youtube') body.youtubeUrl = lessonForm.content;
+        else if (lessonForm.type === 'quiz' || lessonForm.type === 'assessment') body.questions = lessonForm.questions;
+        else if (lessonForm.type === 'text') body.htmlContent = lessonForm.content || '';
+        res = await api.post(`/courses/${courseId}/lessons`, body);
+      }
       if (res.data.success) {
         fetchCourseData();
         resetForms();
+        setVideoFile(null);
       }
     } catch (error) {
       console.error('Create lesson failed', error);
+      // Surface a basic failure state for upload overlay
+      if (uploading) {
+        setUploadPhase('error');
+        setTimeout(() => {
+          setUploading(false);
+        }, 1800);
+      }
     }
+  };
+
+  // Validate and set selected video file
+  const handleVideoFile = (file) => {
+    if (!file) return;
+    const allowed = ['video/mp4','video/webm','video/ogg','video/quicktime'];
+    if (!allowed.includes(file.type)) {
+      setVideoError('Unsupported format. Allowed: MP4, WebM, OGG, MOV');
+      setVideoFile(null);
+      return;
+    }
+    const maxBytes = 500 * 1024 * 1024; // 500MB
+    if (file.size > maxBytes) {
+      setVideoError('File exceeds 500MB limit');
+      setVideoFile(null);
+      return;
+    }
+    setVideoError('');
+    setVideoFile(file);
   };
 
   const handleUpdateLesson = async (e) => {
     e.preventDefault();
     if (!lessonForm.title || !editingLesson) return;
-    
+    if (lessonForm.type === 'video' && videoError) return;
+
+    const isVideoReplacement = lessonForm.type === 'video' && videoFile; // new file selected while editing
     try {
-      const payload = {
-        title: lessonForm.title,
-        type: lessonForm.type,
-        content: lessonForm.content,
-        duration: lessonForm.duration
-      };
-      
-      if (lessonForm.type === 'quiz' || lessonForm.type === 'assessment') {
-        payload.questions = lessonForm.questions;
+      let res;
+      if (isVideoReplacement) {
+        const fd = new FormData();
+        fd.append('title', lessonForm.title);
+        fd.append('type', 'video');
+        fd.append('duration', lessonForm.duration || 15);
+        fd.append('video', videoFile);
+        setUploading(true);
+        setUploadContext('update');
+        setUploadPhase('preparing');
+        setUploadProgress(0);
+        res = await api.put(`/lessons/${editingLesson._id}`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (evt) => {
+            if (evt.total) {
+              const pct = Math.round((evt.loaded / evt.total) * 100);
+              if (uploadPhase !== 'uploading') setUploadPhase('uploading');
+              setUploadProgress(pct);
+              uploadProgressUpdatedAtRef.current = Date.now();
+            } else {
+              if (uploadPhase !== 'uploading') setUploadPhase('uploading');
+              uploadProgressUpdatedAtRef.current = Date.now();
+            }
+          }
+        });
+        finalizeUpload(true);
+      } else {
+        const payload = {
+          title: lessonForm.title,
+          type: lessonForm.type,
+          content: lessonForm.content,
+          duration: lessonForm.duration
+        };
+        if (lessonForm.type === 'quiz' || lessonForm.type === 'assessment') {
+          payload.questions = lessonForm.questions;
+        } else if (lessonForm.type === 'text') {
+          payload.content = lessonForm.content; // ensure text retained
+        } else if (lessonForm.type === 'youtube') {
+          payload.content = lessonForm.content;
+        }
+        res = await api.put(`/lessons/${editingLesson._id}`, payload);
       }
-      
-      await api.put(`/lessons/${editingLesson._id}`, payload);
-      fetchCourseData();
-      resetForms();
+
+      if (res?.data?.success) {
+        if (res.data.replacedVideo) {
+          // Diagnostics: show auth mode used for new upload
+            if (res.data.uploadedWith) {
+              console.info('[LessonUpdate] New video uploaded using auth mode:', res.data.uploadedWith);
+            }
+          if (res.data.oldDriveDeleted === false || res.data.oldLocalDeleted === false) {
+            console.warn('[LessonUpdate] Old file cleanup incomplete', {
+              oldDriveDeleted: res.data.oldDriveDeleted,
+              oldLocalDeleted: res.data.oldLocalDeleted
+            });
+            // Placeholder: could surface a toast/UI alert here in future
+          }
+        }
+        fetchCourseData();
+        resetForms();
+        setVideoFile(null);
+      }
     } catch (error) {
       console.error('Update lesson failed', error);
+      if (isVideoReplacement) {
+        setUploadPhase('error');
+        setTimeout(() => {
+          setUploading(false);
+          setUploadContext(null);
+        }, 1800);
+      }
     }
   };
 
@@ -844,7 +1032,7 @@ const AdminCourseContentEditor = () => {
                 
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    {lessonForm.type === 'video' ? 'Video Content URL' :
+                    {lessonForm.type === 'video' ? 'Video File or URL' :
                      lessonForm.type === 'youtube' ? 'YouTube URL' :
                      lessonForm.type === 'quiz' ? 'Quiz Questions' :
                      lessonForm.type === 'assessment' ? 'Assessment Questions' : 'Article Content'}
@@ -894,6 +1082,165 @@ Blank line = new paragraph`}</pre>
                     </>
                   ) : lessonForm.type === 'quiz' || lessonForm.type === 'assessment' ? (
                     <div className="space-y-4">
+                      {/* AI Generation Toolbar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gradient-to-r from-indigo-50 to-blue-50 border border-blue-100 rounded-lg p-3">
+                        <div className="text-sm font-medium text-blue-700 flex items-center space-x-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6l4 2" /></svg>
+                          <span>Generate questions with AI</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center text-[11px] bg-white rounded-md overflow-hidden border border-blue-200">
+                            {['easy','medium','hard'].map(level => (
+                              <button
+                                key={level}
+                                type="button"
+                                onClick={() => setAiDifficulty(level)}
+                                className={`px-2 py-1 uppercase tracking-wide font-semibold ${aiDifficulty===level ? 'bg-blue-600 text-white' : 'text-blue-600 hover:bg-blue-100'}`}
+                              >{level}</button>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={aiGenerating}
+                            onClick={async () => {
+                              setShowAIPanel(true);
+                              if (aiSuggestions.length === 0) {
+                                setAiError(null);
+                                setAiGenerating(true);
+                                try {
+                                  const aggregatedContext = modules.map(m => (m.lessons || []).map(l => `${l.title}: ${l.content?.data?.htmlContent || ''}`).join('\n')).join('\n');
+                                  let qs = await generateQuizQuestions({
+                                    topic: course?.title || lessonForm.title,
+                                    lessonContent: (lessonForm.content || aggregatedContext).slice(0,4000),
+                                    count: 10,
+                                    difficulty: aiDifficulty
+                                  });
+                                  // Deduplicate against existing lesson questions and internal duplicates
+                                  const existing = lessonForm.questions || [];
+                                  const filtered = [];
+                                  qs.forEach(q => {
+                                    if (!isDuplicateQuestion(q.question, existing) && !isDuplicateQuestion(q.question, filtered)) {
+                                      filtered.push(q);
+                                    }
+                                  });
+                                  qs = filtered;
+                                  setAiSuggestions(qs);
+                                  setAiSelected(new Set(qs.map(q => q.id))); // select all by default
+                                } catch (e) {
+                                  setAiError(e.message || 'Failed to generate');
+                                } finally {
+                                  setAiGenerating(false);
+                                }
+                              }
+                            }}
+                            className="px-3 py-2 text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50"
+                          >{aiGenerating ? 'Generating…' : (aiSuggestions.length ? 'View AI Suggestions' : 'Generate with AI')}</button>
+                          {showAIPanel && (
+                            <button type="button" onClick={() => setShowAIPanel(false)} className="px-2 py-2 text-xs border rounded-md bg-white hover:bg-gray-50">Close</button>
+                          )}
+                        </div>
+                      </div>
+                      {showAIPanel && (
+                        <div className="border border-blue-200 rounded-lg p-4 bg-white shadow-sm">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-sm font-semibold text-blue-700">AI Generated Suggestions</h4>
+                            <div className="flex items-center gap-2 text-xs">
+                              <button type="button" onClick={() => setAiSelected(new Set(aiSuggestions.map(q => q.id)))} className="px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">Select All</button>
+                              <button type="button" onClick={() => setAiSelected(new Set())} className="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Clear</button>
+                              <button
+                                type="button"
+                                disabled={aiSelected.size === 0}
+                                onClick={() => {
+                                  const chosen = aiSuggestions.filter(q => aiSelected.has(q.id)).map(q => ({
+                                    id: Date.now() + Math.random(),
+                                    question: q.question,
+                                    options: q.options,
+                                    correctAnswer: q.correctAnswer,
+                                    marks: q.marks || 1
+                                  }));
+                                  setLessonForm(prev => ({ ...prev, questions: [...prev.questions, ...chosen] }));
+                                  setShowAIPanel(false);
+                                }}
+                                className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                              >Add Selected ({aiSelected.size})</button>
+                            </div>
+                          </div>
+                          {aiError && <div className="text-xs text-red-600 mb-2">{aiError}</div>}
+                          {aiGenerating && <div className="text-xs text-blue-600">Generating questions...</div>}
+                          {!aiGenerating && aiSuggestions.length === 0 && !aiError && <div className="text-xs text-gray-500">No suggestions yet.</div>}
+                          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                            {aiSuggestions.map((q, i) => (
+                              <div key={q.id} className={`p-3 rounded border ${aiSelected.has(q.id) ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50'}`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium mb-1">Q{i + 1}. {q.question}</p>
+                                    <ul className="text-xs list-disc ml-5 space-y-1">
+                                      {q.options.map((opt, idx) => (
+                                        <li key={idx} className={idx === q.correctAnswer ? 'font-semibold text-green-700' : 'text-gray-700'}>{opt}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                  <div className="flex flex-col items-end space-y-2">
+                                    <label className="inline-flex items-center text-xs cursor-pointer select-none">
+                                      <input
+                                        type="checkbox"
+                                        className="mr-1"
+                                        checked={aiSelected.has(q.id)}
+                                        onChange={() => setAiSelected(prev => {
+                                          const copy = new Set(prev);
+                                          if (copy.has(q.id)) copy.delete(q.id); else copy.add(q.id);
+                                          return copy;
+                                        })}
+                                      />Select
+                                    </label>
+                                    <span className="text-[10px] text-gray-500">Answer: {String.fromCharCode(65 + q.correctAnswer)}</span>
+                                    <div className="flex gap-1">
+                                      <button
+                                        type="button"
+                                        className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-gray-300 hover:bg-gray-100"
+                                        title="Regenerate"
+                                        onClick={async () => {
+                                          try {
+                                            const variant = await generateQuizVariant({ baseQuestion: q, mode: 'regenerate', difficulty: aiDifficulty });
+                                            if (isDuplicateQuestion(variant.question, aiSuggestions.filter(s => s.id !== q.id)) || isDuplicateQuestion(variant.question, lessonForm.questions)) {
+                                              setAiError('Regenerated variant was too similar, try again.');
+                                              return;
+                                            }
+                                            setAiSuggestions(prev => prev.map(s => s.id === q.id ? { ...variant, id: q.id } : s));
+                                          } catch (e) {
+                                            setAiError(e.message || 'Regenerate failed');
+                                          }
+                                        }}
+                                      >↻</button>
+                                      <button
+                                        type="button"
+                                        className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-blue-300 text-blue-600 hover:bg-blue-50"
+                                        title="More like this (add variant)"
+                                        onClick={async () => {
+                                          try {
+                                            const variant = await generateQuizVariant({ baseQuestion: q, mode: 'more_like_this', difficulty: aiDifficulty });
+                                            if (isDuplicateQuestion(variant.question, aiSuggestions) || isDuplicateQuestion(variant.question, lessonForm.questions)) {
+                                              setAiError('Variant was too similar to existing suggestions.');
+                                              return;
+                                            }
+                                            setAiSuggestions(prev => {
+                                              const newList = [...prev, { ...variant, id: variant.id }];
+                                              setAiSelected(sel => new Set([...sel, variant.id]));
+                                              return newList;
+                                            });
+                                          } catch (e) {
+                                            setAiError(e.message || 'Variant failed');
+                                          }
+                                        }}
+                                      >➕</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {lessonForm.questions.map((question, questionIndex) => (
                         <div key={question.id} className="border border-gray-200 rounded-lg p-4">
                           <div className="flex justify-between items-start mb-3">
@@ -960,21 +1307,82 @@ Blank line = new paragraph`}</pre>
                       </button>
                     </div>
                   ) : (
-                    <input
-                      type="url"
-                      value={lessonForm.content}
-                      onChange={(e) => setLessonForm({ ...lessonForm, content: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder={
-                        lessonForm.type === 'video' ? 'https://example.com/video1.mp4' :
-                        lessonForm.type === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'Content URL'
-                      }
-                    />
+                    lessonForm.type === 'video' ? (
+                      <div className="space-y-3">
+                        <div
+                          className={`relative border-2 border-dashed rounded-xl p-6 transition-colors cursor-pointer group ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'} ${videoError ? 'border-red-400 bg-red-50' : ''}`}
+                          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); }}
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDragActive(false);
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) handleVideoFile(file);
+                          }}
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="video/mp4,video/webm,video/ogg,video/quicktime"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleVideoFile(file);
+                            }}
+                          />
+                          <div className="flex flex-col items-center text-center">
+                            <div className="w-14 h-14 mb-3 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md">
+                              🎥
+                            </div>
+                            {!videoFile && (
+                              <>
+                                <p className="text-sm font-medium text-gray-800">Drag & drop your video here</p>
+                                <p className="text-xs text-gray-500 mt-1">or <span className="text-blue-600 underline">browse</span> (MP4 / WebM / OGG / MOV)</p>
+                                <p className="text-[10px] text-gray-400 mt-2 tracking-wide uppercase">Max 500MB</p>
+                              </>
+                            )}
+                            {videoFile && (
+                              <div className="w-full">
+                                <div className="flex items-center justify-between text-xs text-gray-600 font-medium mb-1">
+                                  <span className="truncate max-w-[65%]" title={videoFile.name}>{videoFile.name}</span>
+                                  <span>{(videoFile.size/1024/1024).toFixed(1)} MB</span>
+                                </div>
+                                <div className="flex gap-2 mt-2">
+                                  <button type="button" onClick={() => { setVideoFile(null); setVideoError(''); }} className="px-2 py-1 text-[11px] rounded bg-gray-100 hover:bg-gray-200 border border-gray-300">Remove</button>
+                                  <button type="button" onClick={() => fileInputRef.current?.click()} className="px-2 py-1 text-[11px] rounded bg-blue-600 text-white hover:bg-blue-700">Change</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          {videoError && <div className="mt-3 text-[11px] text-red-600 font-medium">{videoError}</div>}
+                        </div>
+                        {!videoFile && (
+                          <input
+                            type="url"
+                            value={lessonForm.content}
+                            onChange={(e) => setLessonForm({ ...lessonForm, content: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="(Optional legacy URL) https://example.com/video.mp4"
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <input
+                        type="url"
+                        value={lessonForm.content}
+                        onChange={(e) => setLessonForm({ ...lessonForm, content: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder={
+                          lessonForm.type === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'Content URL'
+                        }
+                      />
+                    )
                   )}
                   {lessonForm.type === 'video' && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Upload or link to video content like lectures, demonstrations, or tutorials
-                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Upload a video file (mp4/webm/ogg/mov) up to 500MB. If Google Drive integration is configured server-side it will be moved and streamed from there.</p>
                   )}
                   {(lessonForm.type === 'quiz' || lessonForm.type === 'assessment') && lessonForm.questions.length === 0 && (
                     <p className="text-xs text-gray-500 mt-1">
@@ -1008,12 +1416,63 @@ Blank line = new paragraph`}</pre>
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  disabled={uploading || (lessonForm.type==='video' && videoError)}
+                  className={`flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                  {editingLesson ? 'Update Lesson' : 'Add Lesson'}
+                  {editingLesson ? (lessonForm.type==='video' && videoFile ? 'Replace Video' : 'Update Lesson') : 'Add Lesson'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Global Upload Overlay */}
+      {uploading && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md mx-4 bg-white rounded-xl shadow-2xl border border-gray-200 p-8 relative">
+            <div className="absolute -top-3 -right-3 bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg">
+              🎥
+            </div>
+            <h2 className="text-xl font-semibold text-gray-800 mb-2 flex items-center gap-2">
+              <span>{uploadContext === 'update' ? 'Replacing Video' : 'Uploading Video'}</span>
+              {uploadPhase === 'done' && <span className="text-green-600 text-base">✓</span>}
+              {uploadPhase === 'error' && <span className="text-red-600 text-base">⚠</span>}
+            </h2>
+            <p className="text-sm text-gray-600 mb-6 min-h-[1.25rem]">
+              {uploadPhase === 'preparing' && (uploadContext === 'update' ? 'Preparing replacement…' : 'Preparing file…')}
+              {uploadPhase === 'uploading' && (uploadContext === 'update' ? 'Uploading new video…' : 'Transferring data to server…')}
+              {uploadPhase === 'done' && (uploadContext === 'update' ? 'Replacement complete' : 'Upload complete')}
+              {uploadPhase === 'error' && (uploadContext === 'update' ? 'Replacement failed.' : 'Upload failed. Cleaning up…')}
+            </p>
+            <div className="mb-4">
+              <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-200 ${uploadPhase==='error' ? 'bg-red-500' : 'bg-blue-600'}`}
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                <span>{uploadPhase === 'error' ? 'Error' : `${uploadProgress}%`}</span>
+                <span>
+                  {uploadPhase === 'preparing' && (uploadContext === 'update' ? 'Starting' : 'Starting')}
+                  {uploadPhase === 'uploading' && (uploadContext === 'update' ? 'Replacing' : 'Uploading')}
+                  {uploadPhase === 'done' && 'Completed'}
+                  {uploadPhase === 'error' && 'Retry soon'}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600 inline-block animate-pulse" />Live Progress</div>
+              <span>Don’t close tab</span>
+              {uploadPhase === 'done' && (
+                <button
+                  type="button"
+                  onClick={() => { setUploading(false); }}
+                  className="ml-auto px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 text-[10px]"
+                >Close</button>
+              )}
+            </div>
           </div>
         </div>
       )}

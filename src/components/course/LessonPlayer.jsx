@@ -907,44 +907,83 @@ const LessonPlayer = ({ lesson, enrollment, onLessonComplete, onBookmark }) => {
 
     switch (lesson.content.type) {
       case 'video':
-        return (
-          <div className="relative bg-black rounded-lg overflow-hidden">
-            <div className="aspect-video">
-              {lesson.content.data?.videoUrl ? (
-                <video
-                  ref={videoRef}
-                  controls
-                  className="w-full h-full"
-                  poster="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800"
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedMetadata={handleLoadedMetadata}
-                  onEnded={handleVideoEnded}
-                  onSeeking={(e) => {
-                    // Prevent seeking beyond watchedUntil + 2 seconds
-                    if (videoRef.current && videoRef.current.currentTime > watchedUntil + 2) {
-                      videoRef.current.currentTime = watchedUntil;
-                    }
-                  }}
-                >
-                  <source src={lesson.content.data.videoUrl} type="video/mp4" />
-                  <p className="text-white p-4">Your browser does not support the video tag.</p>
-                </video>
-              ) : (
-                <div className="flex items-center justify-center h-96 bg-gray-900 text-white">
-                  <div className="text-center">
-                    <svg className="mx-auto h-16 w-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                    </svg>
-                    <p className="text-lg">Video Lesson</p>
-                    <p className="text-sm text-gray-300 mt-2">
-                      Duration: {lesson.duration || lesson.content.data?.duration || 0} minutes
-                    </p>
-                  </div>
+        {
+          // Decide playback source: Drive embed/stream vs local file
+          const data = lesson.content.data || {};
+          const isDrive = data.storage === 'drive' && (data.embedLink || data.streamUrl || data.driveFileId);
+          // Normalize potential forms into the standard /file/d/<id>/preview form
+          let driveSrc = null;
+          if (data.embedLink) driveSrc = data.embedLink;
+          else if (data.streamUrl && /file\/d\//.test(data.streamUrl)) driveSrc = data.streamUrl;
+          else if (data.streamUrl && data.streamUrl.includes('uc?export=preview&id=')) {
+            const id = (data.streamUrl.split('id=')[1] || '').split('&')[0];
+            if (id) driveSrc = `https://drive.google.com/file/d/${id}/preview`;
+          } else if (data.driveFileId) {
+            driveSrc = `https://drive.google.com/file/d/${data.driveFileId}/preview`;
+          }
+          // Some browsers block inline preview of Drive if not embedded in iframe for certain formats; use iframe for Drive
+          if (isDrive && driveSrc) {
+            return (
+              <div className="relative bg-black rounded-lg overflow-hidden">
+                <div className="aspect-video flex items-center justify-center bg-gray-900">
+                  <iframe
+                    title={lesson.title || 'Drive Video'}
+                    src={driveSrc}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="w-full h-full border-0"
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                    onError={(e) => { /* silently ignore; UI fallback below */ }}
+                  />
                 </div>
-              )}
+                <div className="absolute inset-0 pointer-events-none" />
+                <div className="absolute bottom-2 right-2 flex space-x-2 pointer-events-auto">
+                  <button
+                    type="button"
+                    onClick={() => { if (driveSrc) window.open(driveSrc, '_blank', 'noopener,noreferrer'); }}
+                    className="px-3 py-1.5 text-xs bg-white/80 hover:bg-white rounded shadow border border-gray-300 text-gray-700"
+                  >Open in New Tab</button>
+                </div>
+              </div>
+            );
+          }
+          // Fallback: local video tag
+          return (
+            <div className="relative bg-black rounded-lg overflow-hidden">
+              <div className="aspect-video">
+                {data.videoUrl ? (
+                  <video
+                    ref={videoRef}
+                    controls
+                    className="w-full h-full"
+                    poster="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800"
+                    onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleLoadedMetadata}
+                    onEnded={handleVideoEnded}
+                    onSeeking={() => {
+                      if (videoRef.current && videoRef.current.currentTime > watchedUntil + 2) {
+                        videoRef.current.currentTime = watchedUntil;
+                      }
+                    }}
+                  >
+                    <source src={data.videoUrl} type={data.mimetype || 'video/mp4'} />
+                    <p className="text-white p-4">Your browser does not support the video tag.</p>
+                  </video>
+                ) : (
+                  <div className="flex items-center justify-center h-96 bg-gray-900 text-white">
+                    <div className="text-center">
+                      <svg className="mx-auto h-16 w-16 mb-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                      </svg>
+                      <p className="text-lg">Video Lesson</p>
+                      <p className="text-sm text-gray-300 mt-2">Duration: {lesson.duration || data.duration || 0} minutes</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        );
+          );
+        }
 
       case 'youtube':
         return (
