@@ -225,5 +225,3 @@ Minimal temperature tuning; quiz generation uses structured JSON prompt with dif
 **LearnMate** – Empowering learners with intelligent tooling. 🎓
 
 ---
-
-_Originally bootstrapped with Vite React template._
