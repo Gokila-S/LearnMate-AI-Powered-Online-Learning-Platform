@@ -2,9 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+
+// Middleware imports
 import errorHandler from './middleware/errorHandler.js';
 
-// Import routes
+// Route imports
 import courseRoutes from './routes/courses.js';
 import paymentRoutes from './routes/payments.js';
 import enrollmentRoutes from './routes/enrollments.js';

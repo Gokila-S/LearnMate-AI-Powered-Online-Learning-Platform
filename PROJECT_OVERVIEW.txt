@@ -1,0 +1,193 @@
+LearnMate — Project Overview
+Repository: https://github.com/Gokila-S/LearnMate-AI-Powered-Online-Learning-Platform/
+
+1) Executive Summary
+---------------------
+LearnMate is an AI‑augmented online learning platform implemented on the MERN stack (MongoDB, Express, React, Node). The project aims to provide a modular learning experience: course catalog, module/lesson structure, multiple lesson types (video, YouTube, text, quizzes, assessments), enrollment and progress tracking, plus AI capabilities to assist students (chat widget) and speed content authoring (AI-generated quiz/assessment suggestions). The platform supports local media uploads and optional Google Drive uploads (service account or OAuth personal account). Authentication is JWT-based with role separation for website admins, course admins and learners.
+
+2) Value proposition / Audience
+--------------------------------
+- Audience: Developers, instructors, content authors, and organizations wanting a self-hosted learning platform with AI tooling.
+- Value: Rapid content authoring with AI assistance, flexible media handling (local & Drive), role-based access and an admin toolkit for management and moderation.
+
+3) Top-level Architecture
+-------------------------
+- Frontend: Vite + React application (client-side routing via react-router-dom). Tailwind CSS for styling. Components include course listing, course detail, lesson player, admin editors, AI chat widget.
+- Backend: Node.js + Express REST API (server.js / app.js). Uses Mongoose for MongoDB models. File uploads handled by multer; optional Google Drive integration via googleapis.
+- Database: MongoDB (local or Atlas) accessed through `MONGODB_URI`.
+- Authentication: JWT tokens signed with `JWT_SECRET` and validated in middleware.
+- Integrations: OpenAI for chat and quiz generation; Google Drive (service account or OAuth) for uploads; Razorpay for payments (optional features present).
+
+4) Technologies & Libraries (complete list from manifests)
+--------------------------------------------------------
+Frontend (root `package.json`):
+- react 18
+- react-dom
+- react-router-dom
+- vite (dev server / build tooling)
+- tailwindcss, postcss, autoprefixer
+- react-markdown, remark-gfm
+- axios
+- @heroicons/react, lucide-react
+
+Backend (server `package.json`):
+- node / express
+- mongoose
+- dotenv
+- bcryptjs
+- jsonwebtoken
+- multer
+- googleapis
+- pdfkit
+- razorpay
+- express-validator
+- cors
+- nodemon (dev)
+
+Dev tools & infra notes:
+- Vite dev server for frontend (default port 5173)
+- Nodemon for backend development
+
+5) Repository Structure & Modules
+----------------------------------
+Root
+- `package.json` — frontend scripts: `dev`, `build`, `preview`, `server` (runs backend dev)
+- `vite.config.js`, `tailwind.config.js`, `postcss.config.js`
+
+`server/` (backend)
+- Entry points: `server.js`, `app.js`
+- `config/`:
+  - `database.js` - manages MongoDB connection
+  - `jwt.js` - JWT configuration and helpers
+  - `upload.js` - upload configuration, multer settings
+- `controllers/`:
+  - `userController.js` — user registration, login, profile
+  - `courseController.js` — create/read/update/delete courses
+  - `moduleController.js` — modules management inside courses
+  - `lessonController.js` — lesson creation (video/text/quiz/assessment), serving content
+  - `enrollmentController.js` — enrollments, progress tracking
+  - `discussionController.js`, `paymentController.js`, `aiController.js`, `providerController.js`, `adminController.js`
+- `models/` (Mongoose schemas):
+  - `User.js`, `Course.js`, `Module.js`, `Lesson.js`, `Enrollment.js`, `Discussion.js`, `DiscussionMessage.js`, `Payment.js`, `ProviderApplication.js`, `UserPresence.js`
+- `routes/`:
+  - REST routes grouped per feature: `auth.js`, `users.js`, `courses.js`, `modules.js`, `lessons.js`, `enrollments.js`, `payments.js`, `providers.js`, `discussions.js`, `ai.js`, `admin.js`
+- `middleware/`:
+  - `auth.js` — JWT verification and role checks
+  - `validation.js` — request validation
+  - `errorHandler.js` — centralized error handling
+- `utils/`:
+  - `driveUploader.js` — helper for Google Drive uploads and fallbacks
+  - `seedData.js` — helper used by seed script
+  - other utilities used by controllers
+- `scripts/`:
+  - `seedAdmins.js`, `seedData.js` (or `utils/seedData.js`) — populate demo/admin data
+  - `oauthInit.js` — interactive OAuth flow to obtain Drive tokens
+  - `importFromJson.js` — import structured content
+
+`src/` (frontend)
+- `main.jsx` — app bootstrap
+- `App.jsx` — top-level routing
+- `context/`:
+  - `AuthContext.jsx` — authentication state & helper
+  - `CourseContext.jsx` — course state scoped to UI
+- `services/` — API wrappers
+  - `api.js`, `courseService.js`, `userService.js`, `realtimeService.js`, `aiService.js`, `moduleService.js`, `paymentService.js`, `discussionService.js`
+- `assets/` — static images
+- `components/`:
+  - `common/` — `Header`, `Footer`, `ChatWidget`, `LoadingSpinner`, `MarkdownRenderer`, `ErrorBoundary`
+  - `course/` — `CourseCard`, `CourseList`, `LessonPlayer`, `AssessmentPlayer`, `ModerationTools`, `GroupDiscussion`
+  - `admin/` — `CourseAdminDashboard`, `WebsiteAdminDashboard`
+- `pages/` — `Home.jsx`, `Courses.jsx`, `CourseDetail.jsx`, `Login.jsx`, `Signup.jsx`, `Dashboard.jsx`, `AdminDashboard.jsx`, `AdminCourseEditor.jsx`, `AdminCourseContentEditor.jsx`
+- `utils/` — client utilities like `helpers.js`, `constants.js`, `debugLogger.js`
+
+6) Features (detailed)
+-----------------------
+- Course browsing: search, category filters, level filters, alphabetical sorting
+- Enrollment system: users can enroll in courses; progress is tracked
+- Lessons: multiple types
+  - Video (local upload with multer, optional upload to Google Drive)
+  - YouTube lessons (store & play via ID)
+  - Text lessons (Markdown/HTML rendered on client)
+  - Quizzes & assessments: authorable, with quiz player UI and assessment flows
+- Lesson progress: watched seconds saved; completion thresholds (60% early, 90% auto-complete)
+- Bookmarks, badges, and completion tracking
+- AI features:
+  - Student Chat Widget (OpenAI) — contextual Q&A
+  - Admin AI quiz/assessment generation — difficulty control, regenerate, "more like this", dedupe (Jaccard overlap filtering)
+- Media pipeline: local uploads, optional Drive uploads (Service Account / OAuth personal), Drive fallback to local if issues
+- Admin tools: course/module/lesson management, provider applications, moderation tools
+- Payments: integration points for Razorpay (payment flows not necessarily fully wired in UI)
+
+7) Data Model Highlights
+------------------------
+- `Course` -> contains `Module[]`
+- `Module` -> contains `Lesson[]`
+- `Lesson` -> `content` object with `type` and `data`; for video includes `storage` flag and `driveFileId` when stored in Drive
+- Progress store: per-user watch entries with fields `watchedSeconds`, `durationSeconds`, timestamps
+
+8) Environment Variables (server/.env)
+-------------------------------------
+- CORE:
+  - `NODE_ENV` (development|production)
+  - `PORT` (default sample 5000)
+  - `MONGODB_URI` (required)
+  - `JWT_SECRET` (required)
+  - `JWT_EXPIRE` (e.g. 30d)
+  - `CLIENT_URL` (frontend origin, e.g. http://localhost:5173)
+  - `OPENAI_API_KEY` (for AI features)
+- GOOGLE DRIVE (SERVICE ACCOUNT):
+  - `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+  - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (escape newlines)
+  - `GOOGLE_DRIVE_PARENT_FOLDER_ID`
+- GOOGLE DRIVE (OAUTH):
+  - `GOOGLE_OAUTH_CLIENT_ID`
+  - `GOOGLE_OAUTH_CLIENT_SECRET`
+  - `GOOGLE_OAUTH_REDIRECT_URI` (optional)
+
+9) How to run (Windows PowerShell) — minimal
+------------------------------------------------
+Backend (server):
+  cd server
+  npm install
+  Create `server/.env` with required vars (see section 8)
+  Ensure MongoDB is running (local `mongod` or Atlas connection)
+  npm run seed   # optional: populate demo/admin data
+  npm run dev    # runs nodemon server.js
+
+Frontend (root):
+  cd .. (to repo root)
+  npm install
+  npm run dev    # starts Vite dev server (http://localhost:5173)
+
+10) Scripts of interest
+-----------------------
+- `server` (root) — cd server && npm run dev
+- `npm run dev` (server) — nodemon server.js
+- `npm run start` (server) — node server.js
+- `npm run seed` (server) — seed DB
+- `node scripts/oauthInit.js` — interactive Drive OAuth token creation
+
+11) Testing, monitoring & recommended improvements
+-------------------------------------------------
+- Current repo includes no automated test suite; add Jest + Supertest for API tests, Playwright or Cypress for end-to-end checks.
+- Add `server/.env.example` to document required env vars without secrets.
+- Add a `Dockerfile` for server and a multi-stage Dockerfile for frontend; provide `docker-compose.yml` to run Mongo + server + client locally.
+- Add GitHub Actions workflow: install, lint, run tests, build artifacts.
+
+12) Common issues & troubleshooting
+----------------------------------
+- MongoDB connection errors: verify `MONGODB_URI`, ensure service running or Atlas network allowlist.
+- CORS / API access: ensure `CLIENT_URL` matches frontend and backend CORS settings.
+- OpenAI errors: ensure `OPENAI_API_KEY` is set and not rate-limited.
+- Drive upload errors: ensure service account has permissions or run OAuth flow; verify private key newline format.
+
+13) Recommendations & Next steps for the report
+----------------------------------------------
+- Provide a `server/.env.example` file.
+- Add `README` section or `docs/ARCHITECTURE.md` with an architecture diagram (simple ASCII or link to image).
+- Add CI and tests.
+- Add containerization and `docker-compose` for developer on-boarding.
+- Consider building private streaming/proxy for paid video content instead of `anyone: reader` Drive links.
+
+---
+Generated: Review and adapt for your report. File location: PROJECT_OVERVIEW.txt (repo root)

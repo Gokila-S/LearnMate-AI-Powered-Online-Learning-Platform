@@ -1,8 +1,13 @@
+// Database models
 import Course from '../models/Course.js';
 import Lesson from '../models/Lesson.js';
 import Enrollment from '../models/Enrollment.js';
 import Module from '../models/Module.js';
+
+// Node.js modules
 import path from 'path';
+
+// Utilities
 import { uploadVideoToDrive } from '../utils/driveUploader.js';
 import { deleteDriveFile } from '../utils/driveUploader.js';
 
