@@ -4,6 +4,10 @@
 
 _Modern MERN stack platform featuring AI chat assistance, AI quiz generation, rich lesson types, video (local + Google Drive) handling, progress analytics, and admin tooling._
 
+![Node.js](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen)
+![React](https://img.shields.io/badge/react-18.2.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 </div>
 
 ---
