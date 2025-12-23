@@ -1,5 +1,25 @@
-node_modules
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
 .env
 .env.*
+.env.local
+.env.production
+
+# OAuth credentials
 oauth/
+
+# Uploads
 uploads/lessons/*.tmp
+uploads/temp/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
