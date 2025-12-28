@@ -30,8 +30,8 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
-      // Suppress auto-redirect for payment endpoints so we can surface the error
-      if (url.includes('/payments/')) {
+      // Suppress auto-redirect for payment and AI endpoints so we can surface the error
+      if (url.includes('/payments/') || url.includes('/ai/')) {
         error.suppressedAuthRedirect = true;
         return Promise.reject(error);
       }
