@@ -26,3 +26,8 @@ dist-ssr
 *.mp4
 *.mp3
 server/uploads/
+
+# Environment files
+.env
+.env.*
+!.env.example
