@@ -736,8 +736,9 @@ export const deleteMessage = async (req, res, next) => {
       });
     }
 
-    // Check delete permissions
+    // Check delete permissions - author, course_admin, or website_admin can delete
     const canDelete = req.user.role === 'website_admin' ||
+      req.user.role === 'course_admin' ||
       message.author.toString() === req.user._id.toString();
 
     if (!canDelete) {

@@ -266,13 +266,54 @@ const GroupDiscussion = ({ courseId, isEnrolled, isAdminView = false }) => {
             ...response.data
           }));
         } else {
-          setMessages(prev => prev.map(msg =>
-            msg._id === itemId ? { ...msg, ...response.data } : msg
-          ));
+          // Update both parent messages and replies
+          setMessages(prev => prev.map(msg => {
+            if (msg._id === itemId) return { ...msg, ...response.data };
+            // Check if it's a reply
+            if (msg.replies) {
+              return {
+                ...msg,
+                replies: msg.replies.map(reply =>
+                  reply._id === itemId ? { ...reply, ...response.data } : reply
+                )
+              };
+            }
+            return msg;
+          }));
         }
       }
     } catch (error) {
       console.error('Error voting:', error);
+    }
+  };
+
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm('Delete this message?')) return;
+
+    try {
+      const response = await discussionService.deleteMessage(messageId);
+      if (response.success) {
+        // Remove from messages or from replies
+        setMessages(prev => {
+          // Check if it's a parent message
+          const newMessages = prev.filter(m => m._id !== messageId);
+          // If count same, it might be a reply - update parent's replies
+          if (newMessages.length === prev.length) {
+            return prev.map(msg => ({
+              ...msg,
+              replies: msg.replies ? msg.replies.filter(r => r._id !== messageId) : []
+            }));
+          }
+          return newMessages;
+        });
+        // Update message count
+        setSelectedDiscussion(prev => prev ? { ...prev, messageCount: Math.max((prev.messageCount || 1) - 1, 0) } : prev);
+        setDiscussions(prev => prev.map(d =>
+          d._id === selectedDiscussion?._id ? { ...d, messageCount: Math.max((d.messageCount || 1) - 1, 0) } : d
+        ));
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
     }
   };
 
@@ -785,6 +826,16 @@ const GroupDiscussion = ({ courseId, isEnrolled, isAdminView = false }) => {
                                 </svg>
                               </button>
                             </div>
+                            {/* Delete button - for author or course_admin */}
+                            {user && ((message.author._id || message.author) === user._id || user.role === 'course_admin') && (
+                              <button
+                                onClick={() => handleDeleteMessage(message._id)}
+                                className="text-xs text-red-500 hover:text-red-700 font-medium"
+                                title="Delete message"
+                              >
+                                🗑️
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -830,6 +881,16 @@ const GroupDiscussion = ({ courseId, isEnrolled, isAdminView = false }) => {
                                         </svg>
                                       </button>
                                     </div>
+                                    {/* Delete button for replies - for author or course_admin */}
+                                    {user && ((reply.author._id || reply.author) === user._id || user.role === 'course_admin') && (
+                                      <button
+                                        onClick={() => handleDeleteMessage(reply._id)}
+                                        className="text-xs text-red-500 hover:text-red-700"
+                                        title="Delete reply"
+                                      >
+                                        🗑️
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
