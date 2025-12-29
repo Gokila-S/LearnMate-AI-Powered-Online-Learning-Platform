@@ -15,12 +15,13 @@ LearnMate started as a minimal MVP (browse → enroll → learn) and has evolved
 | Domain | Capabilities |
 |--------|--------------|
 | Learning UX | Course catalog, lesson progression, bookmarks, completion thresholds, video watch tracking (60% + 90% auto-complete), quiz & assessment experiences |
+| Community | Group discussions with categories, threaded replies, voting, moderation tools (pin/lock/resolve/delete), "Course Provider" admin badges |
 | AI & Automation | Contextual student AI chat, admin AI quiz/assessment question suggestions (difficulty, regenerate, more-like-this, dedupe), auto lesson description fallback |
 | Content Types | Text (Markdown/HTML), Video (local / Google Drive via Service Account or OAuth personal Gmail), YouTube, Quiz, Assessment |
 | Media Pipeline | Multer local upload, optional Google Drive upload (service account or OAuth), public preview embedding, graceful fallback to local if Drive unavailable |
 | Data Integrity | Order collision retry for lessons, idempotent seeding scripts, similarity filtering of AI-generated questions |
-| Access & Auth | JWT-based API protection, role separation (website_admin, course_admin, user) |
-| Admin Toolkit | Course & module management, lesson creation (video / text / quiz / assessment), AI quiz suggestion panel |
+| Access & Auth | JWT-based API protection, role separation (website_admin, course_admin, user), admin course view mode |
+| Admin Toolkit | Course & module management, lesson creation (video / text / quiz / assessment), AI quiz suggestion panel, View Page for course preview |
 
 ---
 
@@ -31,6 +32,16 @@ LearnMate started as a minimal MVP (browse → enroll → learn) and has evolved
 * Lesson types: video / YouTube / text / quiz / assessment
 * Enrollment & per-lesson progress persistence (watched seconds, duration, early-complete at 60% or auto at 90%)
 * Bookmarks & completion badges
+
+### Group Discussion
+* **Course Discussions** – Students and course admins can create discussions with categories (General, Questions, Technical, etc.)
+* **Nested Replies** – Reply to messages with threaded conversation view
+* **Voting System** – Upvote/downvote discussions and messages
+* **Moderation Tools** – Pin, Lock, Resolve, and Delete discussions (course admins)
+* **Message Deletion** – Users can delete their own messages; course admins can delete any message
+* **Course Provider Tag** – Course admins display "Course Provider" badge in discussions
+* **Admin Course View** – Course admins can "View Page" from admin dashboard with special banner and full moderation access
+* **Online Users** – See who's currently viewing the course discussions
 
 ### AI & Smart Authoring
 * Student AI Chat Widget (OpenAI) – contextual Q&A helper (model configurable via `OPENAI_API_KEY`).
@@ -236,6 +247,10 @@ If both OAuth tokens and service account exist, OAuth is preferred (personal mod
 | OAuth token script | ✅ | `node scripts/oauthInit.js` |
 | Drive logging & fallback | ✅ | Skips gracefully if misconfigured |
 | Similarity filter | ✅ | Jaccard threshold to remove near duplicates |
+| Group Discussion | ✅ | Create discussions, threaded replies, voting |
+| Discussion Moderation | ✅ | Pin, Lock, Resolve, Delete for course admins |
+| Admin Course View | ✅ | View Page button with Course Provider banner |
+| Message Deletion | ✅ | Users delete own; admins delete any |
 
 ## 🧠 AI Quiz Generation Flow
 1. Admin opens quiz panel inside course editor.
