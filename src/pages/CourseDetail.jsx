@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useCourse } from '../context/CourseContext';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -11,21 +11,26 @@ import ChatWidget from '../components/common/ChatWidget';
 
 const CourseDetail = () => {
   const { id } = useParams();
-  const { 
-    currentCourse, 
-    currentEnrollment, 
-    loading, 
-    error, 
-    fetchCourse, 
-    fetchEnrollmentDetails, 
+  const [searchParams] = useSearchParams();
+  const isAdminView = searchParams.get('adminView') === 'true';
+  const {
+    currentCourse,
+    currentEnrollment,
+    loading,
+    error,
+    fetchCourse,
+    fetchEnrollmentDetails,
     enrollInCourse,
     updateCurrentLesson,
     getLesson,
     createLesson,
     modules
   } = useCourse();
-  const { user, isAuthenticated } = useAuth();
-  
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+
+  // Track if we've initiated the fetch to prevent "not found" flash
+  const [initialFetchDone, setInitialFetchDone] = useState(false);
+
   const [selectedLesson, setSelectedLesson] = useState(null);
   const [loadingLesson, setLoadingLesson] = useState(false);
   const [showLessonForm, setShowLessonForm] = useState(false);
@@ -38,8 +43,8 @@ const CourseDetail = () => {
     order: '',
     isPreview: false,
     video: null,
-  youtubeUrl: '',
-  moduleId: ''
+    youtubeUrl: '',
+    moduleId: ''
   });
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
@@ -75,8 +80,13 @@ const CourseDetail = () => {
   };
 
   useEffect(() => {
+    // Wait for auth to finish loading before fetching course data
+    if (authLoading) return;
+
     if (id) {
-      fetchCourse(id);
+      fetchCourse(id).finally(() => {
+        setInitialFetchDone(true);
+      });
       if (isAuthenticated) {
         fetchEnrollmentDetails(id).then(() => {
           setIsEnrolled(true);
@@ -85,7 +95,7 @@ const CourseDetail = () => {
         });
       }
     }
-  }, [id, isAuthenticated]);
+  }, [id, isAuthenticated, authLoading]);
 
   useEffect(() => {
     const init = async () => {
@@ -127,7 +137,7 @@ const CourseDetail = () => {
 
     setEnrolling(true);
     const result = await enrollInCourse(id);
-    
+
     if (result.success) {
       setIsEnrolled(true);
       await fetchEnrollmentDetails(id);
@@ -229,7 +239,7 @@ const CourseDetail = () => {
     (modules || []).forEach(m => (m.lessons || []).forEach(l => {
       if (!map.has(l._id)) map.set(l._id, l.duration || 0);
     }));
-    return Array.from(map.values()).reduce((a,b) => a + b, 0);
+    return Array.from(map.values()).reduce((a, b) => a + b, 0);
   })();
 
   const handleDownloadCertificate = async () => {
@@ -243,13 +253,13 @@ const CourseDetail = () => {
         // Attempt to read text for error message
         const text = await data.text();
         console.error('Certificate error response:', text);
-        alert('Certificate generation failed: ' + (text.slice(0,120) || 'Unknown error'));
+        alert('Certificate generation failed: ' + (text.slice(0, 120) || 'Unknown error'));
         return;
       }
       const url = window.URL.createObjectURL(data);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${currentCourse.title.replace(/[^a-z0-9-_ ]/gi,'')}-certificate.pdf`;
+      a.download = `${currentCourse.title.replace(/[^a-z0-9-_ ]/gi, '')}-certificate.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -291,14 +301,15 @@ const CourseDetail = () => {
     setCreatingLesson(false);
     if (result.success) {
       // reset form
-  setLessonForm({ title: '', description: '', duration: '', order: '', isPreview: false, video: null, youtubeUrl: '', moduleId: '' });
+      setLessonForm({ title: '', description: '', duration: '', order: '', isPreview: false, video: null, youtubeUrl: '', moduleId: '' });
       setShowLessonForm(false);
     } else {
       alert('Failed to create lesson');
     }
   };
 
-  if (loading) {
+  // Show loading while auth is loading, course is loading, or initial fetch hasn't completed
+  if (authLoading || loading || !initialFetchDone) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <LoadingSpinner size="lg" text="Loading course..." />
@@ -346,15 +357,33 @@ const CourseDetail = () => {
           {/* Course Sidebar - Now smaller */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-lg border sticky top-8 overflow-hidden">
-              {/* Progress Bar (if enrolled) */}
-              {isEnrolled && (
+              {/* Admin View Banner */}
+              {isAdminView && (
+                <div className="p-4 border-b bg-gradient-to-r from-purple-100 to-indigo-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex items-center justify-center w-10 h-10 bg-purple-600 rounded-lg shadow">
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="font-bold text-purple-900 text-sm">Viewing as Course Provider</p>
+                      <p className="text-xs text-purple-700">Full access to course content and discussions</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Progress Bar (if enrolled and not admin view) */}
+              {!isAdminView && isEnrolled && (
                 <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
                   <div className="flex justify-between items-center text-sm text-gray-700 mb-3">
                     <span className="font-semibold">Your Progress</span>
                     <span className="font-bold text-blue-600 bg-white px-3 py-1 rounded-full shadow-sm">{getProgressPercentage()}%</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3 shadow-inner">
-                    <div 
+                    <div
                       className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500 shadow-sm"
                       style={{ width: `${getProgressPercentage()}%` }}
                     ></div>
@@ -370,8 +399,8 @@ const CourseDetail = () => {
                 </div>
               )}
 
-              {/* Enroll Button */}
-              {!isEnrolled && (
+              {/* Enroll Button (not shown in admin view) */}
+              {!isAdminView && !isEnrolled && (
                 <div className="p-6 border-b bg-gradient-to-r from-green-50 to-emerald-50">
                   <button
                     onClick={handleEnroll}
@@ -392,8 +421,8 @@ const CourseDetail = () => {
                 </div>
               )}
 
-                {/* Modules & Lessons List */}
-                <div className="p-8">
+              {/* Modules & Lessons List */}
+              <div className="p-8">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-bold text-gray-900 flex items-center space-x-2">
                     <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg text-white shadow-lg">
@@ -407,7 +436,7 @@ const CourseDetail = () => {
                     {totalLessonsCount} lessons • {formatDuration(totalDurationMinutes)}
                   </div>
                 </div>
-                {user && ['course_admin','website_admin'].includes(user.role) && (
+                {user && ['course_admin', 'website_admin'].includes(user.role) && (
                   <div className="mb-4">
                     <button
                       onClick={() => setShowLessonForm(s => !s)}
@@ -509,171 +538,170 @@ const CourseDetail = () => {
                   {modules && modules.length > 0 && modules.map(mod => {
                     const isExpanded = expandedModules.has(mod._id);
                     return (
-                    <div key={mod._id} className="bg-gradient-to-r from-gray-50 to-slate-50 border border-gray-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
-                      <button
-                        onClick={() => toggleModule(mod._id)}
-                        className="w-full px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 hover:from-blue-100 hover:to-indigo-100 transition-colors duration-200"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-3">
-                            <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg shadow-lg">
-                              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                      <div key={mod._id} className="bg-gradient-to-r from-gray-50 to-slate-50 border border-gray-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
+                        <button
+                          onClick={() => toggleModule(mod._id)}
+                          className="w-full px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 hover:from-blue-100 hover:to-indigo-100 transition-colors duration-200"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                              <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg shadow-lg flex-shrink-0">
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                </svg>
+                              </div>
+                              <div className="text-left">
+                                <h4 className="text-base font-bold text-gray-900">Module {mod.order}: {mod.title}</h4>
+                                <p className="text-xs text-gray-600 mt-1 flex items-center space-x-2">
+                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                                  </svg>
+                                  <span>{mod.totalLessons} lessons</span>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+
+                              <svg
+                                className={`w-4 h-4 text-gray-600 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                               </svg>
                             </div>
-                            <div className="text-left">
-                              <h4 className="text-base font-bold text-gray-900">Module {mod.order}: {mod.title}</h4>
-                              <p className="text-xs text-gray-600 mt-1 flex items-center space-x-2">
-                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-                                </svg>
-                                <span>{mod.totalLessons} lessons</span>
-                              </p>
-                            </div>
                           </div>
-                          <div className="flex items-center space-x-2">
-      
-                            <svg 
-                              className={`w-4 h-4 text-gray-600 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} 
-                              fill="none" 
-                              stroke="currentColor" 
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </div>
-                        </div>
-                      </button>
-                      
-                      {/* Collapsible content */}
-                      <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                        <div className="p-4 space-y-3">
-                          {mod.lessons && mod.lessons.length > 0 ? mod.lessons.map((lesson, idx) => {
-                          // Determine lesson type and styling
-                          const lessonType = lesson.content?.type || 'text';
-                          const isSelected = selectedLesson?._id === lesson._id;
-                          const isCompleted = isLessonCompleted(lesson._id);
-                          
-                          const getTypeConfig = (type) => {
-                            switch(type) {
-                              case 'video':
-                                return { 
-                                  icon: (
-                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-                                      <path fillRule="evenodd" d="M9 9l3-2v6l-3-2V9z" clipRule="evenodd" />
-                                    </svg>
-                                  ), 
-                                  color: 'text-blue-600', 
-                                  bg: 'bg-blue-50',
-                                  label: 'Video'
-                                };
-                              case 'youtube':
-                                return { 
-                                  icon: (
-                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M2 10a8 8 0 1116 0 8 8 0 01-16 0zm6.5-2.5a1 1 0 011.555-.832l3 2a1 1 0 010 1.664l-3 2A1 1 0 018.5 11.5v-4z" clipRule="evenodd" />
-                                    </svg>
-                                  ), 
-                                  color: 'text-red-600', 
-                                  bg: 'bg-red-50',
-                                  label: 'YouTube'
-                                };
-                              case 'quiz':
-                                return { 
-                                  icon: (
-                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                    </svg>
-                                  ), 
-                                  color: 'text-amber-600', 
-                                  bg: 'bg-amber-50',
-                                  label: 'Quiz'
-                                };
-                              case 'assessment':
-                                return { 
-                                  icon: (
-                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H6zm1 2a1 1 0 000 2h6a1 1 0 100-2H7zM6 7a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-                                    </svg>
-                                  ), 
-                                  color: 'text-purple-600', 
-                                  bg: 'bg-purple-50',
-                                  label: 'Assessment'
-                                };
-                              default:
-                                return { 
-                                  icon: (
-                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-                                    </svg>
-                                  ), 
-                                  color: 'text-gray-600', 
-                                  bg: 'bg-gray-50',
-                                  label: 'Text'
-                                };
-                            }
-                          };
-                          
-                          const typeConfig = getTypeConfig(lessonType);
-                          
-                          return (
-                            <button
-                              key={lesson._id}
-                              onClick={() => handleLessonSelect(lesson)}
-                              className={`w-full text-left p-3 rounded-lg border transition-all duration-200 group ${
-                                isSelected 
-                                  ? 'bg-blue-50 border-blue-200 shadow-md transform scale-[1.02]' 
-                                  : 'hover:bg-gray-50 border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center space-x-3 mb-2">
-                                    <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full min-w-0 shrink-0" title="Position within this module">
-                                      {idx + 1}
-                                    </span>
-                                    <div className={`flex items-center justify-center w-6 h-6 rounded ${typeConfig.bg} shrink-0`}>
-                                      <div className={typeConfig.color}>
-                                        {typeConfig.icon}
+                        </button>
+
+                        {/* Collapsible content */}
+                        <div className={`overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                          <div className="p-4 space-y-3">
+                            {mod.lessons && mod.lessons.length > 0 ? mod.lessons.map((lesson, idx) => {
+                              // Determine lesson type and styling
+                              const lessonType = lesson.content?.type || 'text';
+                              const isSelected = selectedLesson?._id === lesson._id;
+                              const isCompleted = isLessonCompleted(lesson._id);
+
+                              const getTypeConfig = (type) => {
+                                switch (type) {
+                                  case 'video':
+                                    return {
+                                      icon: (
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                                          <path fillRule="evenodd" d="M9 9l3-2v6l-3-2V9z" clipRule="evenodd" />
+                                        </svg>
+                                      ),
+                                      color: 'text-blue-600',
+                                      bg: 'bg-blue-50',
+                                      label: 'Video'
+                                    };
+                                  case 'youtube':
+                                    return {
+                                      icon: (
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M2 10a8 8 0 1116 0 8 8 0 01-16 0zm6.5-2.5a1 1 0 011.555-.832l3 2a1 1 0 010 1.664l-3 2A1 1 0 018.5 11.5v-4z" clipRule="evenodd" />
+                                        </svg>
+                                      ),
+                                      color: 'text-red-600',
+                                      bg: 'bg-red-50',
+                                      label: 'YouTube'
+                                    };
+                                  case 'quiz':
+                                    return {
+                                      icon: (
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                        </svg>
+                                      ),
+                                      color: 'text-amber-600',
+                                      bg: 'bg-amber-50',
+                                      label: 'Quiz'
+                                    };
+                                  case 'assessment':
+                                    return {
+                                      icon: (
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H6zm1 2a1 1 0 000 2h6a1 1 0 100-2H7zM6 7a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                                        </svg>
+                                      ),
+                                      color: 'text-purple-600',
+                                      bg: 'bg-purple-50',
+                                      label: 'Assessment'
+                                    };
+                                  default:
+                                    return {
+                                      icon: (
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                                        </svg>
+                                      ),
+                                      color: 'text-gray-600',
+                                      bg: 'bg-gray-50',
+                                      label: 'Text'
+                                    };
+                                }
+                              };
+
+                              const typeConfig = getTypeConfig(lessonType);
+
+                              return (
+                                <button
+                                  key={lesson._id}
+                                  onClick={() => handleLessonSelect(lesson)}
+                                  className={`w-full text-left p-3 rounded-lg border transition-all duration-200 group ${isSelected
+                                    ? 'bg-blue-50 border-blue-200 shadow-md transform scale-[1.02]'
+                                    : 'hover:bg-gray-50 border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                                    }`}
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center space-x-3 mb-2">
+                                        <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full min-w-0 shrink-0" title="Position within this module">
+                                          {idx + 1}
+                                        </span>
+                                        <div className={`flex items-center justify-center w-6 h-6 rounded ${typeConfig.bg} shrink-0`}>
+                                          <div className={typeConfig.color}>
+                                            {typeConfig.icon}
+                                          </div>
+                                        </div>
+                                        <span className="text-sm font-semibold text-gray-900 truncate">
+                                          {lesson.title}
+                                        </span>
+                                        {isCompleted && (
+                                          <svg className="w-4 h-4 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                          </svg>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center space-x-3 text-xs text-gray-500">
+                                        <div className="flex items-center space-x-1">
+                                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                                          </svg>
+                                          <span>{lesson.duration || 0} min</span>
+                                        </div>
+                                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${typeConfig.bg} ${typeConfig.color}`}>
+                                          {typeConfig.label}
+                                        </span>
+                                        {lesson.isPreview && (
+                                          <span className="text-blue-600 font-medium bg-blue-100 px-2 py-1 rounded-full">
+                                            Free
+                                          </span>
+                                        )}
                                       </div>
                                     </div>
-                                    <span className="text-sm font-semibold text-gray-900 truncate">
-                                      {lesson.title}
-                                    </span>
-                                    {isCompleted && (
-                                      <svg className="w-4 h-4 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                      </svg>
-                                    )}
                                   </div>
-                                  <div className="flex items-center space-x-3 text-xs text-gray-500">
-                                    <div className="flex items-center space-x-1">
-                                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                                      </svg>
-                                      <span>{lesson.duration || 0} min</span>
-                                    </div>
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${typeConfig.bg} ${typeConfig.color}`}>
-                                      {typeConfig.label}
-                                    </span>
-                                    {lesson.isPreview && (
-                                      <span className="text-blue-600 font-medium bg-blue-100 px-2 py-1 rounded-full">
-                                        Free
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        }) : (
-                          <p className="text-sm text-gray-500 px-3 py-8 text-center italic">No lessons in this module yet.</p>
-                        )}
+                                </button>
+                              );
+                            }) : (
+                              <p className="text-sm text-gray-500 px-3 py-8 text-center italic">No lessons in this module yet.</p>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  );
+                    );
                   })}
                   {/* Ungrouped lessons (those not in a module) */}
                   {currentCourse.lessons && currentCourse.lessons.filter(l => !modules || !modules.some(m => m.lessons?.some(ml => ml._id === l._id))).length > 0 && (
@@ -694,79 +722,78 @@ const CourseDetail = () => {
                           const lessonType = lesson.content?.type || 'text';
                           const isSelected = selectedLesson?._id === lesson._id;
                           const isCompleted = isLessonCompleted(lesson._id);
-                          
+
                           const getTypeConfig = (type) => {
-                            switch(type) {
+                            switch (type) {
                               case 'video':
-                                return { 
+                                return {
                                   icon: (
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
                                       <path fillRule="evenodd" d="M9 9l3-2v6l-3-2V9z" clipRule="evenodd" />
                                     </svg>
-                                  ), 
-                                  color: 'text-blue-600', 
+                                  ),
+                                  color: 'text-blue-600',
                                   bg: 'bg-blue-50',
                                   label: 'Video'
                                 };
                               case 'youtube':
-                                return { 
+                                return {
                                   icon: (
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M2 10a8 8 0 1116 0 8 8 0 01-16 0zm6.5-2.5a1 1 0 011.555-.832l3 2a1 1 0 010 1.664l-3 2A1 1 0 018.5 11.5v-4z" clipRule="evenodd" />
                                     </svg>
-                                  ), 
-                                  color: 'text-red-600', 
+                                  ),
+                                  color: 'text-red-600',
                                   bg: 'bg-red-50',
                                   label: 'YouTube'
                                 };
                               case 'quiz':
-                                return { 
+                                return {
                                   icon: (
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                                     </svg>
-                                  ), 
-                                  color: 'text-amber-600', 
+                                  ),
+                                  color: 'text-amber-600',
                                   bg: 'bg-amber-50',
                                   label: 'Quiz'
                                 };
                               case 'assessment':
-                                return { 
+                                return {
                                   icon: (
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H6zm1 2a1 1 0 000 2h6a1 1 0 100-2H7zM6 7a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
                                     </svg>
-                                  ), 
-                                  color: 'text-purple-600', 
+                                  ),
+                                  color: 'text-purple-600',
                                   bg: 'bg-purple-50',
                                   label: 'Assessment'
                                 };
                               default:
-                                return { 
+                                return {
                                   icon: (
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
                                     </svg>
-                                  ), 
-                                  color: 'text-gray-600', 
+                                  ),
+                                  color: 'text-gray-600',
                                   bg: 'bg-gray-50',
                                   label: 'Text'
                                 };
                             }
                           };
-                          
+
                           const typeConfig = getTypeConfig(lessonType);
-                          
+
                           return (
                             <button
                               key={lesson._id}
                               onClick={() => handleLessonSelect(lesson)}
-                              className={`w-full text-left p-3 rounded-lg border transition-all duration-200 group ${
-                                isSelected 
-                                  ? 'bg-blue-50 border-blue-200 shadow-md transform scale-[1.02]' 
-                                  : 'hover:bg-gray-50 border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                              }`}
+                              className={`w-full text-left p-3 rounded-lg border transition-all duration-200 group ${isSelected
+                                ? 'bg-blue-50 border-blue-200 shadow-md transform scale-[1.02]'
+                                : 'hover:bg-gray-50 border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                                }`}
                             >
                               <div className="flex items-start justify-between">
                                 <div className="flex-1 min-w-0">
@@ -833,7 +860,7 @@ const CourseDetail = () => {
               <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
                 <h2 className="text-2xl font-bold text-gray-900 mb-4">{currentCourse.title}</h2>
                 {/* Course description removed per requirements */}
-                
+
                 {/* Instructor Info */}
                 <div className="flex items-center justify-center space-x-4 mb-6">
                   <img
@@ -855,14 +882,15 @@ const CourseDetail = () => {
 
         {/* Group Discussion Section */}
         <div className="mt-8">
-          <GroupDiscussion 
-            courseId={id} 
-            isEnrolled={isEnrolled} 
+          <GroupDiscussion
+            courseId={id}
+            isEnrolled={isEnrolled || isAdminView}
+            isAdminView={isAdminView}
           />
         </div>
       </div>
       {isAuthenticated && (
-        <ChatWidget 
+        <ChatWidget
           user={user}
           courseTitle={currentCourse?.title}
           lessonTitle={selectedLesson?.title}

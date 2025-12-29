@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useCourse } from '../../context/CourseContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import LoadingSpinner from '../common/LoadingSpinner';
 import api from '../../services/api';
 import moduleService from '../../services/moduleService';
@@ -181,11 +181,11 @@ const CourseAdminDashboard = () => {
     if (!moduleForm.title) return;
     try {
       setCreatingModule(true);
-  const payload = { title: moduleForm.title };
+      const payload = { title: moduleForm.title };
       if (moduleForm.order) payload.order = Number(moduleForm.order);
       const res = await moduleService.createModule(editingCourse._id, payload);
       if (res.success) {
-  setModuleForm({ title: '', order: '' });
+        setModuleForm({ title: '', order: '' });
         setShowAddModule(false);
         fetchModules(editingCourse._id);
       }
@@ -210,7 +210,7 @@ const CourseAdminDashboard = () => {
   };
   const saveModuleEdit = async (moduleId) => {
     try {
-  const payload = { title: moduleEditValues.title };
+      const payload = { title: moduleEditValues.title };
       if (moduleEditValues.order) payload.order = Number(moduleEditValues.order);
       const res = await moduleService.updateModule(moduleId, payload);
       if (res.success) {
@@ -255,11 +255,10 @@ const CourseAdminDashboard = () => {
           <nav className="flex space-x-8">
             <button
               onClick={() => setActiveTab('courses')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'courses'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'courses'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
             >
               Course Management
             </button>
@@ -436,29 +435,29 @@ const CourseAdminDashboard = () => {
             {loading ? (
               <LoadingSpinner size="lg" text="Loading courses..." />
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
+              <div className="bg-white rounded-lg shadow overflow-x-auto">
+                <table className="w-full divide-y divide-gray-200" style={{ minWidth: '1100px' }}>
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '220px' }}>
                         Course
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '130px' }}>
                         Category
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '70px' }}>
                         Price
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '70px' }}>
                         Lessons
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '90px' }}>
                         Enrollments
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '90px' }}>
                         Status
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '320px' }}>
                         Actions
                       </th>
                     </tr>
@@ -466,50 +465,58 @@ const CourseAdminDashboard = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {courses.map((course) => (
                       <tr key={course._id}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">{course.title}</div>
-                          <div className="text-sm text-gray-500">{course.level}</div>
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-medium text-gray-900 truncate" style={{ maxWidth: '200px' }}>{course.title}</div>
+                          <div className="text-xs text-gray-500">{course.level}</div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           {course.category}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           ${course.price}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           {course.totalLessons || 0}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-4 py-3 text-sm text-gray-900">
                           {course.enrollmentCount || 0}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            course.isPublished 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${course.isPublished
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-yellow-100 text-yellow-800'
+                            }`}>
                             {course.isPublished ? 'Published' : 'Draft'}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                          <button
-                            onClick={() => handleEditCourse(course)}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleTogglePublish(course._id, course.isPublished)}
-                            className="text-green-600 hover:text-green-900"
-                          >
-                            {course.isPublished ? 'Unpublish' : 'Publish'}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteCourse(course._id)}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            Delete
-                          </button>
+                        <td className="px-4 py-3 text-sm font-medium">
+                          <div className="flex items-center gap-3 whitespace-nowrap">
+                            <button
+                              onClick={() => handleEditCourse(course)}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleTogglePublish(course._id, course.isPublished)}
+                              className="text-green-600 hover:text-green-900"
+                            >
+                              {course.isPublished ? 'Unpublish' : 'Publish'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCourse(course._id)}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              Delete
+                            </button>
+                            <Link
+                              to={`/courses/${course._id}?adminView=true`}
+                              className="text-purple-600 hover:text-purple-900 whitespace-nowrap"
+                              title="View course page as admin"
+                            >
+                              View Page
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     ))}

@@ -8,10 +8,21 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
 
   // Check if user has moderation permissions
   const canModerate = user && (
-    user.role === 'website_admin' || 
-    user.role === 'course_admin' || 
+    user.role === 'website_admin' ||
+    user.role === 'course_admin' ||
     discussion.author._id === user._id
   );
+
+  // Check if user is an admin (website_admin or course_admin)
+  const isAdmin = user && (
+    user.role === 'website_admin' ||
+    user.role === 'course_admin'
+  );
+
+  // Check if user is just the author (not an admin)
+  const isAuthorOnly = user &&
+    discussion.author._id === user._id &&
+    !isAdmin;
 
   if (!canModerate) {
     return null;
@@ -24,7 +35,7 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
         action: 'pin',
         value: !discussion.isPinned
       });
-      
+
       if (response.success) {
         onUpdate({ ...discussion, isPinned: !discussion.isPinned });
       }
@@ -42,7 +53,7 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
         action: 'lock',
         value: !discussion.isLocked
       });
-      
+
       if (response.success) {
         onUpdate({ ...discussion, isLocked: !discussion.isLocked });
       }
@@ -60,10 +71,10 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
         action: 'resolve',
         value: !discussion.isResolved
       });
-      
+
       if (response.success) {
-        onUpdate({ 
-          ...discussion, 
+        onUpdate({
+          ...discussion,
           isResolved: !discussion.isResolved,
           resolvedBy: !discussion.isResolved ? user._id : null,
           resolvedAt: !discussion.isResolved ? new Date() : null
@@ -84,7 +95,7 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
     setLoading(true);
     try {
       const response = await discussionService.deleteDiscussion(discussion._id);
-      
+
       if (response.success) {
         onUpdate(null); // Signal deletion to parent
       }
@@ -95,6 +106,40 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
     }
   };
 
+  // For non-admin authors, render inline buttons only (no wrapper)
+  if (isAuthorOnly) {
+    return (
+      <div className="flex items-center gap-2">
+        {/* Resolve button */}
+        <button
+          onClick={handleToggleResolve}
+          disabled={loading}
+          title={discussion.isResolved ? 'Unresolve' : 'Mark Resolved'}
+          className={`flex items-center justify-center p-2 rounded-lg border transition-all duration-200 ${discussion.isResolved
+            ? 'bg-green-100 border-green-300 text-green-700 hover:bg-green-200'
+            : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            } disabled:opacity-50`}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        </button>
+        {/* Delete button */}
+        <button
+          onClick={handleDeleteDiscussion}
+          disabled={loading}
+          title="Delete"
+          className="flex items-center justify-center p-2 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 transition-all duration-200"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
+  // Admin view with full panel
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
@@ -105,20 +150,20 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
           <span className="font-semibold text-amber-800">Moderation Tools</span>
         </div>
         <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
-          {user.role === 'website_admin' ? 'Website Admin' : 
-           user.role === 'course_admin' ? 'Course Instructor' : 'Author'}
+          {user.role === 'website_admin' ? 'Website Admin' : 'Course Instructor'}
         </span>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Pin button */}
         <button
           onClick={handleTogglePin}
           disabled={loading}
-          className={`flex items-center justify-center space-x-2 p-3 rounded-lg border transition-all duration-200 ${
-            discussion.isPinned
-              ? 'bg-orange-100 border-orange-300 text-orange-700 hover:bg-orange-200'
-              : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-          } disabled:opacity-50`}
+          title={discussion.isPinned ? 'Unpin' : 'Pin'}
+          className={`flex items-center justify-center space-x-2 p-3 rounded-lg border transition-all duration-200 ${discussion.isPinned
+            ? 'bg-orange-100 border-orange-300 text-orange-700 hover:bg-orange-200'
+            : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            } disabled:opacity-50`}
         >
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
             <path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" />
@@ -129,14 +174,15 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
           </span>
         </button>
 
+        {/* Lock button */}
         <button
           onClick={handleToggleLock}
           disabled={loading}
-          className={`flex items-center justify-center space-x-2 p-3 rounded-lg border transition-all duration-200 ${
-            discussion.isLocked
-              ? 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200'
-              : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-          } disabled:opacity-50`}
+          title={discussion.isLocked ? 'Unlock' : 'Lock'}
+          className={`flex items-center justify-center space-x-2 p-3 rounded-lg border transition-all duration-200 ${discussion.isLocked
+            ? 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200'
+            : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            } disabled:opacity-50`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             {discussion.isLocked ? (
@@ -150,35 +196,36 @@ const ModerationPanel = ({ discussion, onUpdate }) => {
           </span>
         </button>
 
+        {/* Resolve button */}
         <button
           onClick={handleToggleResolve}
           disabled={loading}
-          className={`flex items-center justify-center space-x-2 p-3 rounded-lg border transition-all duration-200 ${
-            discussion.isResolved
-              ? 'bg-green-100 border-green-300 text-green-700 hover:bg-green-200'
-              : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-          } disabled:opacity-50`}
+          title={discussion.isResolved ? 'Unresolve' : 'Mark Resolved'}
+          className={`flex items-center justify-center space-x-2 p-3 rounded-lg border transition-all duration-200 ${discussion.isResolved
+            ? 'bg-green-100 border-green-300 text-green-700 hover:bg-green-200'
+            : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+            } disabled:opacity-50`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
           <span className="text-sm font-medium">
-            {discussion.isResolved ? 'Unresolve' : 'Mark Resolved'}
+            {discussion.isResolved ? 'Unresolve' : 'Resolve'}
           </span>
         </button>
 
-        {(user.role === 'website_admin' || discussion.author._id === user._id) && (
-          <button
-            onClick={handleDeleteDiscussion}
-            disabled={loading}
-            className="flex items-center justify-center space-x-2 p-3 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 transition-all duration-200"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            <span className="text-sm font-medium">Delete</span>
-          </button>
-        )}
+        {/* Delete button */}
+        <button
+          onClick={handleDeleteDiscussion}
+          disabled={loading}
+          title="Delete"
+          className="flex items-center justify-center space-x-2 p-3 rounded-lg border border-red-300 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 transition-all duration-200"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          <span className="text-sm font-medium">Delete</span>
+        </button>
       </div>
 
       {discussion.isLocked && (
@@ -202,15 +249,15 @@ const MessageModerationMenu = ({ message, discussion, onUpdate }) => {
 
   // Check moderation permissions
   const canModerate = user && (
-    user.role === 'website_admin' || 
-    user.role === 'course_admin' || 
+    user.role === 'website_admin' ||
+    user.role === 'course_admin' ||
     discussion.author._id === user._id ||
     message.author._id === user._id
   );
 
   const canMarkBestAnswer = user && (
-    user.role === 'website_admin' || 
-    user.role === 'course_admin' || 
+    user.role === 'website_admin' ||
+    user.role === 'course_admin' ||
     discussion.author._id === user._id
   );
 
@@ -239,8 +286,8 @@ const MessageModerationMenu = ({ message, discussion, onUpdate }) => {
     setLoading(true);
     try {
       const response = await discussionService.deleteMessage(message._id);
-        if (response.success) {
-          onUpdate({ ...message, isDeleted: true });
+      if (response.success) {
+        onUpdate({ ...message, isDeleted: true });
         setShowMenu(false);
       }
     } catch (error) {
@@ -263,8 +310,8 @@ const MessageModerationMenu = ({ message, discussion, onUpdate }) => {
 
       {showMenu && (
         <>
-          <div 
-            className="fixed inset-0 z-10" 
+          <div
+            className="fixed inset-0 z-10"
             onClick={() => setShowMenu(false)}
           />
           <div className="absolute right-0 top-8 z-20 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2">

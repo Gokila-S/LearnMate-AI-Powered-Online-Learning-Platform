@@ -25,7 +25,11 @@ function App() {
   // Simple role helpers used inside Route elements
   const AdminRedirect = ({ children }) => {
     const { isAuthenticated, user } = useAuth();
-    if (isAuthenticated && user?.role !== 'user') {
+    // Allow admins to view course pages when adminView=true
+    const urlParams = new URLSearchParams(window.location.search);
+    const isAdminView = urlParams.get('adminView') === 'true';
+
+    if (isAuthenticated && user?.role !== 'user' && !isAdminView) {
       return <Navigate to="/admin" replace />;
     }
     return children;
@@ -47,30 +51,30 @@ function App() {
               <Header />
               <main className="flex-1">
                 <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/courses" element={<AdminRedirect><Courses /></AdminRedirect>} />
-                <Route path="/courses/:id" element={<AdminRedirect><CourseDetail /></AdminRedirect>} />
-                <Route path="/dashboard" element={<StudentOnly><Dashboard /></StudentOnly>} />
-                <Route path="/admin" element={<AdminDashboard />} />
-                <Route path="/admin/courses/:courseId/edit-content" element={<AdminCourseContentEditor />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/signup" element={<Signup />} />
-                
-                {/* Fallback route */}
-                <Route path="*" element={
-                  <div className="min-h-screen flex items-center justify-center">
-                    <div className="text-center">
-                      <h1 className="text-4xl font-bold text-gray-900 mb-4">404</h1>
-                      <p className="text-gray-600 mb-6">Page not found</p>
-                      <a 
-                        href="/" 
-                        className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
-                      >
-                        Go Home
-                      </a>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/courses" element={<AdminRedirect><Courses /></AdminRedirect>} />
+                  <Route path="/courses/:id" element={<AdminRedirect><CourseDetail /></AdminRedirect>} />
+                  <Route path="/dashboard" element={<StudentOnly><Dashboard /></StudentOnly>} />
+                  <Route path="/admin" element={<AdminDashboard />} />
+                  <Route path="/admin/courses/:courseId/edit-content" element={<AdminCourseContentEditor />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/signup" element={<Signup />} />
+
+                  {/* Fallback route */}
+                  <Route path="*" element={
+                    <div className="min-h-screen flex items-center justify-center">
+                      <div className="text-center">
+                        <h1 className="text-4xl font-bold text-gray-900 mb-4">404</h1>
+                        <p className="text-gray-600 mb-6">Page not found</p>
+                        <a
+                          href="/"
+                          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
+                        >
+                          Go Home
+                        </a>
+                      </div>
                     </div>
-                  </div>
-                } />
+                  } />
                 </Routes>
               </main>
               <Footer />

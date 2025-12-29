@@ -3,13 +3,31 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 const Header = () => {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
+
+  // Show minimal header while auth is loading to prevent flash
+  if (loading) {
+    return (
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center">
+              <a href="/" className="flex items-center space-x-2">
+                <img src="/logo.png" alt="LearnMate" className="w-8 h-8" />
+                <span className="text-xl font-bold text-gray-900">LearnMate</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="bg-white shadow-sm border-b">
@@ -36,19 +54,18 @@ const Header = () => {
                 Dashboard
               </Link>
             )}
-
-            {/* Admin link for admin roles */}
-            {isAuthenticated && ['course_admin', 'website_admin'].includes(user?.role) && (
-              <Link to="/admin" className="text-gray-700 hover:text-blue-600 font-medium">
-                Admin
-              </Link>
-            )}
           </nav>
 
           {/* User Menu */}
           <div className="flex items-center space-x-4">
             {isAuthenticated ? (
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-4">
+                {/* Admin link for admin roles - positioned on right side */}
+                {['course_admin', 'website_admin'].includes(user?.role) && (
+                  <Link to="/admin" className="text-sm text-blue-600 hover:text-blue-700 font-medium px-3 py-1.5 bg-blue-50 rounded-lg">
+                    Admin Panel
+                  </Link>
+                )}
                 <div className="flex items-center space-x-2">
                   <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
                     <span className="text-sm font-medium text-gray-700">
