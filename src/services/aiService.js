@@ -13,7 +13,9 @@ export async function sendAIChat(messages) {
     throw new Error(res.data?.message || 'AI response failed');
   } catch (err) {
     console.error('AI chat error:', err);
-    throw err;
+    // Extract meaningful error message from response if available
+    const errorMessage = err.response?.data?.message || err.message || 'Failed to get AI response';
+    throw new Error(errorMessage);
   }
 }
 

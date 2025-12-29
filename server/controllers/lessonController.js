@@ -81,11 +81,11 @@ export const updateLesson = async (req, res, next) => {
     }
 
     const updates = {};
-  let oldDriveFileIdToDelete = null;
-  let oldLocalPathToDelete = null;
-  let uploadedWith = null; // drive auth mode if new upload occurs
-  let oldDriveDeleted = null;
-  let oldLocalDeleted = null;
+    let oldDriveFileIdToDelete = null;
+    let oldLocalPathToDelete = null;
+    let uploadedWith = null; // drive auth mode if new upload occurs
+    let oldDriveDeleted = null;
+    let oldLocalDeleted = null;
 
     if (req.body.title !== undefined) updates.title = req.body.title;
     if (req.body.description !== undefined) updates.description = req.body.description;
@@ -100,8 +100,8 @@ export const updateLesson = async (req, res, next) => {
           oldDriveFileIdToDelete = lesson.content.data.driveFileId;
         } else if (lesson.content.data.storage === 'local' && lesson.content.data.videoUrl) {
           // local path is served from /uploads/lessons/<filename>
-            const base = path.basename(lesson.content.data.videoUrl);
-            oldLocalPathToDelete = path.join(process.cwd(), 'uploads', 'lessons', base);
+          const base = path.basename(lesson.content.data.videoUrl);
+          oldLocalPathToDelete = path.join(process.cwd(), 'uploads', 'lessons', base);
         }
       }
       // Build new content data similarly to addLesson logic
@@ -121,6 +121,11 @@ export const updateLesson = async (req, res, next) => {
         contentData.streamUrl = `https://drive.google.com/file/d/${driveMeta.driveFileId}/preview`;
         contentData.embedLink = `https://drive.google.com/file/d/${driveMeta.driveFileId}/preview`;
         uploadedWith = getDriveAuthMode() || null;
+        // Delete local temp file after successful Drive upload
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.warn('[LessonUpdate] Temp file cleanup failed:', err.message);
+          else console.log('[LessonUpdate] Cleaned up temp file:', req.file.path);
+        });
       }
       updates.content = { type: 'video', data: contentData };
     } else {
@@ -136,10 +141,10 @@ export const updateLesson = async (req, res, next) => {
     // Post-update cleanup (best effort) - delete old Drive/local video if replaced
     if (req.file) {
       if (oldDriveFileIdToDelete) {
-        try { oldDriveDeleted = await deleteDriveFile(oldDriveFileIdToDelete); } catch(e){ oldDriveDeleted = false; console.warn('[LessonUpdate] Old Drive file delete failed:', e.message); }
+        try { oldDriveDeleted = await deleteDriveFile(oldDriveFileIdToDelete); } catch (e) { oldDriveDeleted = false; console.warn('[LessonUpdate] Old Drive file delete failed:', e.message); }
       }
       if (oldLocalPathToDelete) {
-        try { fs.unlink(oldLocalPathToDelete, ()=>{}); oldLocalDeleted = true; } catch(e){ oldLocalDeleted = false; console.warn('[LessonUpdate] Old local file delete failed:', e.message); }
+        try { fs.unlink(oldLocalPathToDelete, () => { }); oldLocalDeleted = true; } catch (e) { oldLocalDeleted = false; console.warn('[LessonUpdate] Old local file delete failed:', e.message); }
       }
     }
 
@@ -182,7 +187,7 @@ export const deleteLesson = async (req, res, next) => {
       { $pull: { lessons: lesson._id }, $inc: { totalLessons: -1 } }
     );
 
-  let driveDeletion = null;
+    let driveDeletion = null;
     try {
       if (lesson.content?.type === 'video' && lesson.content?.data?.storage === 'drive' && lesson.content?.data?.driveFileId) {
         console.log('[LessonDelete] Attempting Drive file removal', {
@@ -196,7 +201,7 @@ export const deleteLesson = async (req, res, next) => {
           try {
             const drive = await (await import('googleapis')).google.drive({ version: 'v3', auth: (await (async () => { /* reuse internal client via util */ return (await driveUtil)?.getDriveAuthMode ? undefined : undefined; })()) });
             // NOTE: Above direct verification is intentionally skipped to avoid re-auth complexity.
-          } catch(verifyErr) {
+          } catch (verifyErr) {
             // Silently ignore; verification is optional
           }
         }

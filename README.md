@@ -4,10 +4,6 @@
 
 _Modern MERN stack platform featuring AI chat assistance, AI quiz generation, rich lesson types, video (local + Google Drive) handling, progress analytics, and admin tooling._
 
-![Node.js](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen)
-![React](https://img.shields.io/badge/react-18.2.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-
 </div>
 
 ---
@@ -19,12 +15,13 @@ LearnMate started as a minimal MVP (browse → enroll → learn) and has evolved
 | Domain | Capabilities |
 |--------|--------------|
 | Learning UX | Course catalog, lesson progression, bookmarks, completion thresholds, video watch tracking (60% + 90% auto-complete), quiz & assessment experiences |
+| Community | Group discussions with categories, threaded replies, voting, moderation tools (pin/lock/resolve/delete), "Course Provider" admin badges |
 | AI & Automation | Contextual student AI chat, admin AI quiz/assessment question suggestions (difficulty, regenerate, more-like-this, dedupe), auto lesson description fallback |
 | Content Types | Text (Markdown/HTML), Video (local / Google Drive via Service Account or OAuth personal Gmail), YouTube, Quiz, Assessment |
 | Media Pipeline | Multer local upload, optional Google Drive upload (service account or OAuth), public preview embedding, graceful fallback to local if Drive unavailable |
 | Data Integrity | Order collision retry for lessons, idempotent seeding scripts, similarity filtering of AI-generated questions |
-| Access & Auth | JWT-based API protection, role separation (website_admin, course_admin, user) |
-| Admin Toolkit | Course & module management, lesson creation (video / text / quiz / assessment), AI quiz suggestion panel |
+| Access & Auth | JWT-based API protection, role separation (website_admin, course_admin, user), admin course view mode |
+| Admin Toolkit | Course & module management, lesson creation (video / text / quiz / assessment), AI quiz suggestion panel, View Page for course preview |
 
 ---
 
@@ -35,6 +32,16 @@ LearnMate started as a minimal MVP (browse → enroll → learn) and has evolved
 * Lesson types: video / YouTube / text / quiz / assessment
 * Enrollment & per-lesson progress persistence (watched seconds, duration, early-complete at 60% or auto at 90%)
 * Bookmarks & completion badges
+
+### Group Discussion
+* **Course Discussions** – Students and course admins can create discussions with categories (General, Questions, Technical, etc.)
+* **Nested Replies** – Reply to messages with threaded conversation view
+* **Voting System** – Upvote/downvote discussions and messages
+* **Moderation Tools** – Pin, Lock, Resolve, and Delete discussions (course admins)
+* **Message Deletion** – Users can delete their own messages; course admins can delete any message
+* **Course Provider Tag** – Course admins display "Course Provider" badge in discussions
+* **Admin Course View** – Course admins can "View Page" from admin dashboard with special banner and full moderation access
+* **Online Users** – See who's currently viewing the course discussions
 
 ### AI & Smart Authoring
 * Student AI Chat Widget (OpenAI) – contextual Q&A helper (model configurable via `OPENAI_API_KEY`).
@@ -220,6 +227,82 @@ If both OAuth tokens and service account exist, OAuth is preferred (personal mod
 4. **Open your browser:**
    - Navigate to `http://localhost:5173`
 
+## ✅ Feature Checklist
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Course search/filter | ✅ | Text, category, level, sort, startsWith |
+| Enrollment & progress | ✅ | Watched seconds persisted |
+| Video (local) | ✅ | Multer + static serving |
+| Video (Drive SA) | ✅ | Public link permission auto-set |
+| Video (Drive OAuth) | ✅ | Personal Gmail tokens; embed preview |
+| YouTube lessons | ✅ | Extract ID + lazy play |
+| AI Chat (student) | ✅ | Floating widget, conversation history client-side |
+| AI Quiz suggestions | ✅ | Difficulty, regenerate, more-like-this, dedupe |
+| Quiz player | ✅ | Timer, score, review, retake |
+| Assessment placeholder | ✅ | Modular player component |
+| Lesson order retry | ✅ | Prevent duplicate order collisions |
+| Bookmarks | ✅ | Per-user bookmarks |
+| OpenAI integration | ✅ | Chat + question generation |
+| OAuth token script | ✅ | `node scripts/oauthInit.js` |
+| Drive logging & fallback | ✅ | Skips gracefully if misconfigured |
+| Similarity filter | ✅ | Jaccard threshold to remove near duplicates |
+| Group Discussion | ✅ | Create discussions, threaded replies, voting |
+| Discussion Moderation | ✅ | Pin, Lock, Resolve, Delete for course admins |
+| Admin Course View | ✅ | View Page button with Course Provider banner |
+| Message Deletion | ✅ | Users delete own; admins delete any |
+
+## 🧠 AI Quiz Generation Flow
+1. Admin opens quiz panel inside course editor.
+2. Select difficulty → generate N suggestions.
+3. Dedupe & display; each question can spawn “More like this”.
+4. Select subset → persist as quiz or assessment lesson.
+
+Similarity Heuristic: token set overlap ≥ ~85% treated as duplicate.
+
+## 🗃 Data Model Highlights
+* `Lesson.content` polymorphic: `{ type: 'video'|'youtube'|'text'|'quiz'|'assessment', data: {...} }`
+* Video (Drive) data adds: `driveFileId`, `embedLink`, `webViewLink`, `webContentLink`, `storage='drive'`.
+* Progress tracked by lesson watch collection entries (watchedSeconds, durationSeconds).
+
+## 🔍 Logging Conventions
+| Prefix | Meaning |
+|--------|---------|
+| [DriveUpload] | Drive client lifecycle & errors |
+| [LessonAdd] | Post-upload warnings or fallback |
+| [OAuthInit] | OAuth token acquisition script |
+
+## 🛡 Security Notes
+* Do NOT commit secrets (`.env`, private keys, `drive-tokens.json`).
+* Drive public permission uses `anyone: reader` – for paid content you may want a proxy stream with signed URLs.
+* Rotate keys if they were exposed during development.
+
+## 🧪 Useful Scripts
+| Command | Location | Purpose |
+|---------|----------|---------|
+| `npm run dev` | server | Start API with nodemon |
+| `npm run seed` | server | Seed initial data/admins |
+| `node scripts/oauthInit.js` | server | Obtain Drive OAuth tokens |
+| `node scripts/checkAdmins.js` | server | Validate admin existence |
+
+## 🗺 Roadmap / Next Steps
+| Priority | Candidate Enhancement |
+|----------|----------------------|
+| High | Proxy streaming endpoint for private Drive playback |
+| High | Video transcoding / normalization pipeline |
+| Medium | Rate limit / caching for AI endpoints |
+| Medium | Rich analytics dashboard (per-lesson retention) |
+| Low | Multi-language i18n layer |
+| Low | Dark mode theme toggle |
+
+## ❓ Troubleshooting
+| Issue | Cause | Resolution |
+|-------|-------|------------|
+| Drive quota error | Service account in personal My Drive | Use OAuth or Shared Drive |
+| Iframe refused to connect | CSP from certain Drive hosts | Use `/file/d/<id>/preview` or proxy route |
+| No OAuth refresh token | Already granted scope | Delete tokens file & re-run init |
+| AI quiz duplicates | Similar semantics | Adjust threshold or manual deselect |
+| Slow Drive preview | Large file still processing | Wait or provide local fallback |
 
 ## 🤖 OpenAI Usage
 Minimal temperature tuning; quiz generation uses structured JSON prompt with difficulty scaling + variant generation. Consider adding rate limiting & caching in production.
@@ -229,3 +312,5 @@ Minimal temperature tuning; quiz generation uses structured JSON prompt with dif
 **LearnMate** – Empowering learners with intelligent tooling. 🎓
 
 ---
+
+_Originally bootstrapped with Vite React template._

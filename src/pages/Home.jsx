@@ -1,7 +1,5 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-
-// Context & components
 import { useAuth } from '../context/AuthContext';
 import CourseList from '../components/course/CourseList';
 

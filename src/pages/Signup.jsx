@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { API_BASE_URL } from '../utils/constants';
 
 const Signup = () => {
   const navigate = useNavigate();
   const { register, loading, error } = useAuth();
-  
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -23,7 +24,7 @@ const Signup = () => {
       ...prev,
       [name]: value
     }));
-    
+
     // Clear error for this field when user starts typing
     if (formErrors[name]) {
       setFormErrors(prev => ({
@@ -35,47 +36,47 @@ const Signup = () => {
 
   const validateForm = () => {
     const errors = {};
-    
+
     if (!formData.name) {
       errors.name = 'Name is required';
     } else if (formData.name.length < 2) {
       errors.name = 'Name must be at least 2 characters';
     }
-    
+
     if (!formData.email) {
       errors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
       errors.email = 'Email is invalid';
     }
-    
+
     if (!formData.password) {
       errors.password = 'Password is required';
     } else if (formData.password.length < 6) {
       errors.password = 'Password must be at least 6 characters';
     }
-    
+
     if (!formData.confirmPassword) {
       errors.confirmPassword = 'Please confirm your password';
     } else if (formData.password !== formData.confirmPassword) {
       errors.confirmPassword = 'Passwords do not match';
     }
-    
+
     return errors;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     const errors = validateForm();
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       return;
     }
-    
+
     try {
       if (applyAsProvider) {
         // Submit provider application only; do not create user yet
-        const res = await fetch('http://localhost:5000/api/providers/applications', {
+        const res = await fetch(`${API_BASE_URL}/providers/applications`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -155,9 +156,8 @@ const Signup = () => {
                   autoComplete="name"
                   value={formData.name}
                   onChange={handleChange}
-                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
-                    formErrors.name ? 'border-red-300' : 'border-gray-300'
-                  }`}
+                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${formErrors.name ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   placeholder="Enter your full name"
                 />
                 {formErrors.name && (
@@ -179,9 +179,8 @@ const Signup = () => {
                   autoComplete="email"
                   value={formData.email}
                   onChange={handleChange}
-                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
-                    formErrors.email ? 'border-red-300' : 'border-gray-300'
-                  }`}
+                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${formErrors.email ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   placeholder="Enter your email"
                 />
                 {formErrors.email && (
@@ -203,9 +202,8 @@ const Signup = () => {
                   autoComplete="new-password"
                   value={formData.password}
                   onChange={handleChange}
-                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
-                    formErrors.password ? 'border-red-300' : 'border-gray-300'
-                  }`}
+                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${formErrors.password ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   placeholder="Create a password"
                 />
                 {formErrors.password && (
@@ -227,9 +225,8 @@ const Signup = () => {
                   autoComplete="new-password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
-                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
-                    formErrors.confirmPassword ? 'border-red-300' : 'border-gray-300'
-                  }`}
+                  className={`appearance-none block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${formErrors.confirmPassword ? 'border-red-300' : 'border-gray-300'
+                    }`}
                   placeholder="Confirm your password"
                 />
                 {formErrors.confirmPassword && (

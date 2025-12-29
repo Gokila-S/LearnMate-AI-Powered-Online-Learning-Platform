@@ -10,28 +10,32 @@ import UserPresence from '../models/UserPresence.js';
 export const getCourseDiscussions = async (req, res, next) => {
   try {
     const { courseId } = req.params;
-    const { 
-      page = 1, 
-      limit = 20, 
-      category, 
+    const {
+      page = 1,
+      limit = 20,
+      category,
       sort = 'lastActivity',
       order = 'desc',
       search,
-      tags 
+      tags
     } = req.query;
 
-    // Check if user is enrolled in the course
-    // Enrollment model uses 'student' field (not 'user')
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: courseId 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to access discussions'
+    // Check if user is enrolled in the course OR is an admin
+    // Admins (course_admin, website_admin) can access any course discussions
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: courseId
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to access discussions'
+        });
+      }
     }
 
     // Build query
@@ -87,11 +91,11 @@ export const getCourseDiscussions = async (req, res, next) => {
       upvoteCount: discussion.upvotes?.length || 0,
       downvoteCount: discussion.downvotes?.length || 0,
       totalVotes: (discussion.upvotes?.length || 0) - (discussion.downvotes?.length || 0),
-      userVote: discussion.upvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-        ? 'up' 
-        : discussion.downvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-        ? 'down' 
-        : null
+      userVote: discussion.upvotes?.some(v => v.user.toString() === req.user._id.toString())
+        ? 'up'
+        : discussion.downvotes?.some(v => v.user.toString() === req.user._id.toString())
+          ? 'down'
+          : null
     }));
 
     const total = await Discussion.countDocuments(query);
@@ -119,17 +123,21 @@ export const createDiscussion = async (req, res, next) => {
     const { courseId } = req.params;
     const { title, content, category, tags } = req.body;
 
-    // Check enrollment
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: courseId 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to create discussions'
+    // Check enrollment - admins can create discussions without enrollment
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: courseId
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to create discussions'
+        });
+      }
     }
 
     // Validate input
@@ -168,25 +176,30 @@ export const getDiscussion = async (req, res, next) => {
     const { courseId, discussionId } = req.params;
     const { page = 1, limit = 50 } = req.query;
 
-    // Check enrollment
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: courseId 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to access discussions'
+    // Check enrollment - admins can access without enrollment
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: courseId
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to access discussions'
+        });
+      }
     }
 
-    // Get discussion and increment views
-    const discussion = await Discussion.findByIdAndUpdate(
-      discussionId,
-      { $inc: { views: 1 } },
-      { new: true }
-    ).populate('author', 'name profilePicture role bio');
+    // Increment views without waiting (fire and forget)
+    Discussion.updateOne({ _id: discussionId }, { $inc: { views: 1 } }).exec();
+
+    // Get discussion
+    const discussion = await Discussion.findById(discussionId)
+      .populate('author', 'name profilePicture role')
+      .lean();
 
     if (!discussion || discussion.course.toString() !== courseId) {
       return res.status(404).json({
@@ -195,49 +208,58 @@ export const getDiscussion = async (req, res, next) => {
       });
     }
 
-    // Get messages with pagination (parent messages only, replies loaded separately)
-    const messages = await DiscussionMessage.find({
+    // Get parent messages first
+    const parentMessages = await DiscussionMessage.find({
       discussion: discussionId,
       parentMessage: null,
       isDeleted: false
     })
       .populate('author', 'name profilePicture role')
-      .populate({
-        path: 'replies',
-        match: { isDeleted: false },
-        populate: {
-          path: 'author',
-          select: 'name profilePicture role'
-        },
-        options: { sort: { createdAt: 1 } }
-      })
       .sort({ isBestAnswer: -1, createdAt: 1 })
-      .limit(limit * 1)
+      .limit(Math.min(limit * 1, 30))
       .skip((page - 1) * limit)
       .lean();
 
-    // Add vote information for messages
-    const messagesWithVotes = messages.map(message => ({
-      ...message,
-      upvoteCount: message.upvotes?.length || 0,
-      downvoteCount: message.downvotes?.length || 0,
-      totalVotes: (message.upvotes?.length || 0) - (message.downvotes?.length || 0),
-      userVote: message.upvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-        ? 'up' 
-        : message.downvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-        ? 'down' 
-        : null,
-      replies: message.replies?.map(reply => ({
+    // Get all replies for these messages in a single query (more efficient)
+    const parentIds = parentMessages.map(m => m._id);
+    const allReplies = await DiscussionMessage.find({
+      parentMessage: { $in: parentIds },
+      isDeleted: false
+    })
+      .populate('author', 'name profilePicture role')
+      .sort({ createdAt: 1 })
+      .lean();
+
+    // Group replies by parent message
+    const repliesByParent = {};
+    allReplies.forEach(reply => {
+      const parentId = reply.parentMessage.toString();
+      if (!repliesByParent[parentId]) repliesByParent[parentId] = [];
+      repliesByParent[parentId].push({
         ...reply,
         upvoteCount: reply.upvotes?.length || 0,
         downvoteCount: reply.downvotes?.length || 0,
         totalVotes: (reply.upvotes?.length || 0) - (reply.downvotes?.length || 0),
-        userVote: reply.upvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-          ? 'up' 
-          : reply.downvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-          ? 'down' 
-          : null
-      })) || []
+        userVote: reply.upvotes?.some(v => v.user?.toString() === req.user._id.toString())
+          ? 'up'
+          : reply.downvotes?.some(v => v.user?.toString() === req.user._id.toString())
+            ? 'down'
+            : null
+      });
+    });
+
+    // Add vote information and replies for messages
+    const messagesWithVotes = parentMessages.map(message => ({
+      ...message,
+      upvoteCount: message.upvotes?.length || 0,
+      downvoteCount: message.downvotes?.length || 0,
+      totalVotes: (message.upvotes?.length || 0) - (message.downvotes?.length || 0),
+      userVote: message.upvotes?.some(v => v.user?.toString() === req.user._id.toString())
+        ? 'up'
+        : message.downvotes?.some(v => v.user?.toString() === req.user._id.toString())
+          ? 'down'
+          : null,
+      replies: repliesByParent[message._id.toString()] || []
     }));
 
     const totalMessages = await DiscussionMessage.countDocuments({
@@ -246,17 +268,17 @@ export const getDiscussion = async (req, res, next) => {
       isDeleted: false
     });
 
-    // Add discussion vote information
+    // Add discussion vote information (discussion is already plain object from lean())
     const discussionWithVotes = {
-      ...discussion.toObject(),
+      ...discussion,
       upvoteCount: discussion.upvotes?.length || 0,
       downvoteCount: discussion.downvotes?.length || 0,
       totalVotes: (discussion.upvotes?.length || 0) - (discussion.downvotes?.length || 0),
-      userVote: discussion.upvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-        ? 'up' 
-        : discussion.downvotes?.some(v => v.user.toString() === req.user._id.toString()) 
-        ? 'down' 
-        : null
+      userVote: discussion.upvotes?.some(v => v.user?.toString() === req.user._id.toString())
+        ? 'up'
+        : discussion.downvotes?.some(v => v.user?.toString() === req.user._id.toString())
+          ? 'down'
+          : null
     };
 
     res.status(200).json({
@@ -293,17 +315,21 @@ export const voteOnDiscussion = async (req, res, next) => {
       });
     }
 
-    // Check enrollment in the course
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: discussion.course 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to vote'
+    // Check enrollment in the course - admins can vote without enrollment
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: discussion.course
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to vote'
+        });
+      }
     }
 
     const userId = req.user._id;
@@ -359,17 +385,21 @@ export const createMessage = async (req, res, next) => {
       });
     }
 
-    // Check enrollment
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: discussion.course 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to post messages'
+    // Check enrollment - admins can post without enrollment
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: discussion.course
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to post messages'
+        });
+      }
     }
 
     if (!content?.trim()) {
@@ -421,17 +451,21 @@ export const voteOnMessage = async (req, res, next) => {
       });
     }
 
-    // Check enrollment (Enrollment model uses 'student' field, not 'user')
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: message.discussion.course 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to vote'
+    // Check enrollment - admins can vote without enrollment
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: message.discussion.course
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to vote'
+        });
+      }
     }
 
     const userId = req.user._id;
@@ -485,10 +519,10 @@ export const markBestAnswer = async (req, res, next) => {
     }
 
     // Check if user is course owner, website admin, or discussion author
-    const isAuthorized = req.user.role === 'website_admin' || 
-                        req.user.role === 'course_admin' ||
-                        message.discussion.author.toString() === req.user._id.toString() ||
-                        (message.discussion.course.owner && message.discussion.course.owner.toString() === req.user._id.toString());
+    const isAuthorized = req.user.role === 'website_admin' ||
+      req.user.role === 'course_admin' ||
+      message.discussion.author.toString() === req.user._id.toString() ||
+      (message.discussion.course.owner && message.discussion.course.owner.toString() === req.user._id.toString());
 
     if (!isAuthorized) {
       return res.status(403).json({
@@ -500,8 +534,8 @@ export const markBestAnswer = async (req, res, next) => {
     // Remove best answer status from other messages in this discussion
     await DiscussionMessage.updateMany(
       { discussion: message.discussion._id },
-      { 
-        $set: { 
+      {
+        $set: {
           isBestAnswer: false,
           bestAnswerSelectedBy: null,
           bestAnswerSelectedAt: null
@@ -538,17 +572,21 @@ export const getOnlineUsers = async (req, res, next) => {
   try {
     const { courseId } = req.params;
 
-    // Check enrollment
-    const enrollment = await Enrollment.findOne({ 
-      student: req.user._id, 
-      course: courseId 
-    });
-    
-    if (!enrollment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You must be enrolled in this course to see online users'
+    // Check enrollment - admins can see online users without enrollment
+    const isAdmin = req.user.role === 'course_admin';
+
+    if (!isAdmin) {
+      const enrollment = await Enrollment.findOne({
+        student: req.user._id,
+        course: courseId
       });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'You must be enrolled in this course to see online users'
+        });
+      }
     }
 
     const onlineUsers = await UserPresence.find({
@@ -588,10 +626,10 @@ export const moderateDiscussion = async (req, res, next) => {
     }
 
     // Check moderation permissions
-    const isAuthorized = req.user.role === 'website_admin' || 
-                        req.user.role === 'course_admin' ||
-                        discussion.author.toString() === req.user._id.toString() ||
-                        (discussion.course.owner && discussion.course.owner.toString() === req.user._id.toString());
+    const isAuthorized = req.user.role === 'website_admin' ||
+      req.user.role === 'course_admin' ||
+      discussion.author.toString() === req.user._id.toString() ||
+      (discussion.course.owner && discussion.course.owner.toString() === req.user._id.toString());
 
     if (!isAuthorized) {
       return res.status(403).json({
@@ -652,8 +690,8 @@ export const deleteDiscussion = async (req, res, next) => {
     }
 
     // Check delete permissions (only author or admins)
-    const canDelete = req.user.role === 'website_admin' || 
-                     discussion.author.toString() === req.user._id.toString();
+    const canDelete = req.user.role === 'website_admin' ||
+      discussion.author.toString() === req.user._id.toString();
 
     if (!canDelete) {
       return res.status(403).json({
@@ -698,9 +736,10 @@ export const deleteMessage = async (req, res, next) => {
       });
     }
 
-    // Check delete permissions
-    const canDelete = req.user.role === 'website_admin' || 
-                     message.author.toString() === req.user._id.toString();
+    // Check delete permissions - author, course_admin, or website_admin can delete
+    const canDelete = req.user.role === 'website_admin' ||
+      req.user.role === 'course_admin' ||
+      message.author.toString() === req.user._id.toString();
 
     if (!canDelete) {
       return res.status(403).json({

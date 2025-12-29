@@ -65,29 +65,55 @@ const initialState = {
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
-  // Initialize auth state
+  // Initialize auth state - optimized for faster loading
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-  const token = localStorage.getItem('token');
-  const user = localStorage.getItem('user');
+        const token = localStorage.getItem('token');
+        const userStr = localStorage.getItem('user');
 
-  if (token && user) {
-          // Verify token is still valid by fetching user data
+        if (token && userStr) {
+          // Immediately use cached user data for faster loading
           try {
-            const userData = await authAPI.getUser();
+            const cachedUser = JSON.parse(userStr);
             dispatch({
               type: 'LOGIN',
               payload: {
-                user: userData,
+                user: cachedUser,
                 token
               }
             });
-          } catch (error) {
-            // Token is invalid, clear storage
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            dispatch({ type: 'SET_LOADING', payload: false });
+
+            // Verify token in background (non-blocking)
+            authAPI.getUser().then(userData => {
+              // Update with fresh data if different
+              if (JSON.stringify(userData) !== userStr) {
+                localStorage.setItem('user', JSON.stringify(userData));
+                dispatch({
+                  type: 'UPDATE_USER',
+                  payload: userData
+                });
+              }
+            }).catch(() => {
+              // Token is invalid, clear storage and logout
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              dispatch({ type: 'LOGOUT' });
+            });
+          } catch (parseError) {
+            // Invalid cached user, verify with API
+            try {
+              const userData = await authAPI.getUser();
+              localStorage.setItem('user', JSON.stringify(userData));
+              dispatch({
+                type: 'LOGIN',
+                payload: { user: userData, token }
+              });
+            } catch (error) {
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              dispatch({ type: 'SET_LOADING', payload: false });
+            }
           }
         } else {
           dispatch({ type: 'SET_LOADING', payload: false });
@@ -105,9 +131,9 @@ export const AuthProvider = ({ children }) => {
   const login = async (credentials) => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
-      
+
       const response = await authAPI.login(credentials);
-      
+
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
 
@@ -131,9 +157,9 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
-      
+
       const response = await authAPI.register(userData);
-      
+
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
 
@@ -147,10 +173,10 @@ export const AuthProvider = ({ children }) => {
 
       return { success: true };
     } catch (error) {
-      const errorMessage = error.response?.data?.msg || 
-                          error.response?.data?.errors?.[0]?.msg || 
-                          error.message || 
-                          'Registration failed';
+      const errorMessage = error.response?.data?.msg ||
+        error.response?.data?.errors?.[0]?.msg ||
+        error.message ||
+        'Registration failed';
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
       return { success: false, error: errorMessage };
     }
@@ -167,10 +193,10 @@ export const AuthProvider = ({ children }) => {
   const updateUser = async (userData) => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
-      
+
       const updatedUser = await authAPI.updateUser(userData);
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
+
       dispatch({ type: 'UPDATE_USER', payload: updatedUser });
       return { success: true };
     } catch (error) {

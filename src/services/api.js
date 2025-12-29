@@ -1,9 +1,8 @@
 import axios from 'axios';
 
-// API configuration
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// Create axios instance with default configuration
+// Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -31,8 +30,8 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
-      // Suppress auto-redirect for payment endpoints so we can surface the error
-      if (url.includes('/payments/')) {
+      // Suppress auto-redirect for payment and AI endpoints so we can surface the error
+      if (url.includes('/payments/') || url.includes('/ai/')) {
         error.suppressedAuthRedirect = true;
         return Promise.reject(error);
       }
